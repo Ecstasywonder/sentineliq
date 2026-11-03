@@ -3,6 +3,7 @@ Application configuration — loaded from environment variables.
 All settings have explicit types and defaults.
 Secrets are NEVER committed — use .env file (see .env.example).
 """
+
 from __future__ import annotations
 
 from functools import lru_cache

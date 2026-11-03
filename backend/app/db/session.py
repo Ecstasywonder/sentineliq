@@ -19,15 +19,24 @@ settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Engine
+# Pool arguments are only valid for PostgreSQL/MySQL, not SQLite.
+# They are omitted when the URL uses SQLite (test environments).
 # ---------------------------------------------------------------------------
-engine: AsyncEngine = create_async_engine(
-    settings.database_url,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
-    pool_timeout=settings.db_pool_timeout,
-    pool_pre_ping=True,
-    echo=settings.debug,
-)
+def _make_engine() -> AsyncEngine:
+    url = settings.database_url
+    if url.startswith("sqlite"):
+        return create_async_engine(url, echo=settings.debug)
+    return create_async_engine(
+        url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_pre_ping=True,
+        echo=settings.debug,
+    )
+
+
+engine: AsyncEngine = _make_engine()
 
 # ---------------------------------------------------------------------------
 # Session factory

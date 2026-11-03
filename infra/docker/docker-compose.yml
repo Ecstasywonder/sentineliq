@@ -1,0 +1,83 @@
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL database with pgvector
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: sentineliq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sentineliq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev_only}
+      POSTGRES_DB: sentineliq
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentineliq -d sentineliq"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sentineliq-net
+
+  # ---------------------------------------------------------------------------
+  # Backend — FastAPI
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+    container_name: sentineliq-backend
+    restart: unless-stopped
+    env_file:
+      - ../../backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sentineliq:${POSTGRES_PASSWORD:-changeme_dev_only}@postgres:5432/sentineliq
+      DATABASE_URL_SYNC: postgresql://sentineliq:${POSTGRES_PASSWORD:-changeme_dev_only}@postgres:5432/sentineliq
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../backend:/app
+      - media_data:/app/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - sentineliq-net
+
+  # ---------------------------------------------------------------------------
+  # Frontend — React + Vite (dev mode)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../infra/docker/Dockerfile.frontend
+    container_name: sentineliq-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - sentineliq-net
+
+volumes:
+  postgres_data:
+  media_data:
+
+networks:
+  sentineliq-net:
+    driver: bridge

@@ -34,8 +34,8 @@ Gates are executed in order. No gate is considered complete until:
 | **9** | Risk Assessment API | ✅ Complete | `docs/gate-9-risk-assessment-api.md` |
 | **10** | Operator Decision API | ✅ Complete | `docs/gate-10-operator-decision-api.md` |
 | **11** | Escalation API | ✅ Complete | `docs/gate-11-escalation-api.md` |
-| **12** | Audit Trail API | 🔲 Next | — |
-| **13** | Feedback API | 🔲 Pending | — |
+| **12** | Audit Trail API | ✅ Complete | `docs/gate-12-audit-trail-api.md` |
+| **13** | Feedback API | 🔲 Next | — |
 | **14** | Triage Agent (watsonx Orchestrate) | 🔲 Pending | — |
 | **15** | Context Agent (watsonx Orchestrate) | 🔲 Pending | — |
 | **16** | Explanation Agent (watsonx Orchestrate) | 🔲 Pending | — |
@@ -172,12 +172,25 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 12 — Audit Trail API (Next)
+## Gate 12 — Audit Trail API ✅
+
+**Branch:** `gate-12-audit-trail-api`
+**Deliverables:**
+- `GET /api/v1/events/{id}/audit` — event-scoped trail, paginated, newest-first
+- `GET /api/v1/audit` — global trail, filtered by action / actor / since / until
+- `assessment_service.py` updated — writes `risk_assessed` AuditEvent on every assessment
+- `app/schemas/audit.py` — `AuditEntryResponse`, `AuditListResponse`
+- 29 integration tests
+
+---
+
+## Gate 13 — Feedback API (Next)
 
 **Scope:**
-- `GET /api/v1/events/{id}/audit` — full audit trail for a single event
-- `GET /api/v1/audit` — global audit trail with filtering (actor, action, date range)
-- Read-only — no write endpoints (audit trail is INSERT-only by design)
+- `POST /api/v1/events/{id}/feedback` — submit feedback on an assessment
+- `GET /api/v1/events/{id}/feedback` — retrieve all feedback for an event
+- Feedback types: `correct_risk`, `incorrect_risk`, `missing_evidence`, `false_positive`, `other`
+- Audit trail entry on every submission
 
 ---
 

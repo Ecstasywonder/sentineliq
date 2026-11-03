@@ -52,12 +52,12 @@ IBM Bob (local)          Git Repository          EC2 Server
 
 ## 3. EC2 Target Environment
 
-**Connection:** `ssh -i ~/.ssh/"test key.pem" ubuntu@98.81.243.2`  
-**Expected OS:** Ubuntu (AWS EC2, likely Ubuntu 22.04 LTS or 24.04 LTS)
+**Connection:** `ssh -i "sentinelIq.pem" ubuntu@ec2-54-164-137-222.compute-1.amazonaws.com`
+**Expected OS:** Ubuntu (AWS EC2)
 
 ### EC2 Environment — Confirmed ✅
 
-**Instance:** AWS EC2 — `ubuntu@ip-172-31-18-119` (98.81.243.2)
+**Instance:** AWS EC2 — `ubuntu@ec2-54-164-137-222.compute-1.amazonaws.com`
 **Verified:** 2026-11-03
 
 | Runtime | Version Found | Required | Status |

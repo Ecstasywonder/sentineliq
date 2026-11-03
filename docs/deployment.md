@@ -119,3 +119,26 @@ alembic upgrade head
 | `GET /api/v1/system/info` | App info and feature flags |
 | `GET /docs` | Swagger UI (dev only) |
 | `GET /openapi.json` | OpenAPI schema |
+
+## Running Gate 4 Tests — Risk Engine & Confidence Engine
+
+```bash
+cd ~/sentineliq/backend
+source .venv/bin/activate
+
+# Run only Gate 4 engine tests (fast — SQLite in-memory, no postgres needed)
+APP_ENV=development \
+SECRET_KEY=test-secret-key \
+DATABASE_URL="sqlite+aiosqlite:///:memory:" \
+DATABASE_URL_SYNC="sqlite:///:memory:" \
+  pytest tests/test_risk_engine.py tests/test_confidence_engine.py -v
+
+# Run the full test suite
+APP_ENV=development \
+SECRET_KEY=test-secret-key \
+DATABASE_URL="sqlite+aiosqlite:///:memory:" \
+DATABASE_URL_SYNC="sqlite:///:memory:" \
+  pytest tests/ -v
+```
+
+**Expected:** all tests pass, coverage report printed.

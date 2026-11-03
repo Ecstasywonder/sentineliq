@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth as auth_router
 from app.api.v1.endpoints import decisions as decisions_router
+from app.api.v1.endpoints import escalations as escalations_router
 from app.api.v1.endpoints import events as events_router
 from app.api.v1.endpoints import health as health_router
 from app.api.v1.endpoints import risk_policies as risk_policies_router
@@ -40,6 +41,13 @@ api_v1_router.include_router(
     decisions_router.router,
     prefix="/events",
     tags=["Decisions"],
+)
+
+# Escalations — create, retrieve, update escalation records (Gate 11)
+api_v1_router.include_router(
+    escalations_router.router,
+    prefix="/events",
+    tags=["Escalations"],
 )
 
 # Context tools — evidence retrieval (Gate 7, ADR-005 read-only adapters)

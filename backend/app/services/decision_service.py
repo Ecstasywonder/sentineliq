@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditEvent
 from app.models.decision import OperatorDecision
+from app.models.escalation import Escalation
 from app.models.event import SecurityEvent
 from app.schemas.decision import (
     DECISION_STATUS_MAP,
@@ -154,6 +155,14 @@ class DecisionService:
         self._session.add(event)
         await self._session.flush()
 
+        # ---- 8. Auto-create Escalation row when decision is 'escalate' --
+        # The event is now in 'escalated' status; seed a default escalation
+        # record so GET /escalation works immediately without an extra POST.
+        if decision_type == "escalate":
+            await self._auto_create_escalation(event_id, actor, actor_role, decided_at)
+
+        await self._session.flush()
+
         logger.info(
             "decision_service.recorded",
             event_id=event_id,
@@ -221,3 +230,43 @@ class DecisionService:
         if event is None:
             raise ValueError(f"Event '{event_id}' not found.")
         return event
+
+    async def _auto_create_escalation(
+        self,
+        event_id: str,
+        actor: AuthenticatedUser,
+        actor_role: str,
+        escalated_at: str,
+    ) -> None:
+        """
+        Seed a default Escalation row immediately after an 'escalate' decision.
+
+        Uses 'shift_supervisor' as the default destination so the record is
+        immediately queryable.  Operators can create a more specific escalation
+        via POST /escalation if needed.
+        """
+        row = Escalation(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            escalated_by=actor.id,
+            escalated_by_role=actor_role,
+            destination="shift_supervisor",
+            priority="high",
+            note=None,
+            status="pending_acknowledgement",
+            escalated_at=escalated_at,
+        )
+        self._session.add(row)
+        self._session.add(AuditEvent(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            action="escalated",
+            actor=actor.email,
+            actor_role=actor_role,
+            occurred_at=escalated_at,
+            details_json=json.dumps({
+                "escalation_id": row.id,
+                "destination": "shift_supervisor",
+                "auto_created": True,
+            }),
+        ))

@@ -30,8 +30,8 @@ Gates are executed in order. No gate is considered complete until:
 | **5** | Event Ingestion API | ✅ Complete | `docs/gate-5-event-ingestion-api.md` |
 | **6** | RBAC & Authentication | ✅ Complete | `docs/gate-6-rbac-auth.md` |
 | **7** | Evidence Retrieval API (Context Tools) | ✅ Complete | `docs/gate-7-evidence-retrieval.md` |
-| **8** | Evidence Aggregation Service | 🔲 Next | — |
-| **9** | Risk Assessment API | 🔲 Pending | — |
+| **8** | Evidence Aggregation Service | ✅ Complete | `docs/gate-8-assessment-api.md` |
+| **9** | Risk Assessment API | 🔲 Next | — |
 | **10** | Operator Decision API | 🔲 Pending | — |
 | **11** | Escalation API | 🔲 Pending | — |
 | **12** | Audit Trail API | 🔲 Pending | — |
@@ -119,13 +119,24 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 8 — Evidence Aggregation Service (Next)
+## Gate 8 — Evidence Aggregation Service ✅
+
+**Deliverables:**
+- `POST /api/v1/events/{id}/assess` — full deterministic assessment pipeline
+- `AssessmentService.run()` — orchestrates evidence → risk → confidence → persist → state change
+- `app/schemas/assessment.py` — `AssessEventRequest` + `AssessmentResponse` schemas
+- `app/services/assessment_service.py` — 7-step deterministic pipeline (no LLM, ADR-003)
+- `tests/test_assessment_api.py` — 14 integration tests covering happy path, signals, re-assessment, error cases
+- Evidence aggregation wired: all 6 sources gathered, errors isolated, confidence reduced on missing sources
+
+---
+
+## Gate 9 — Risk Assessment API (Next)
 
 **Scope:**
-- Wire `EvidenceAggregator` to `POST /api/v1/events/{id}/assess` trigger
-- Persist `AggregatedEvidence` bundle into `event_evidence` table
-- Return evidence bundle as part of assessment response
-- Integration tests: full assess→evidence round-trip
+- `GET /api/v1/events/{id}/assessment` — retrieve persisted assessment for an event
+- `GET /api/v1/events/{id}/assessment/factors` — per-factor breakdown
+- Optional: `POST /api/v1/events/{id}/assess/retry` for failed assessments
 
 ---
 
@@ -152,3 +163,4 @@ Gates are executed in order. No gate is considered complete until:
 | 5 | 39 (events API + lifecycle) | 113 | 90% |
 | 6 | 31 (auth + RBAC) | 144 | 90% |
 | 7 | ~50 (tools API + aggregator) | ~194 | TBC |
+| 8 | 14 (assessment API round-trip) | ~208 | TBC |

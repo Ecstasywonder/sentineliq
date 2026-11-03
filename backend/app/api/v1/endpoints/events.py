@@ -1,10 +1,12 @@
 """
-Event Ingestion & Queue API — Gate 5.
+Event Ingestion & Queue API — Gates 5 & 8.
 
 Routes:
-    POST   /api/v1/events          Ingest a security event
-    GET    /api/v1/events          Paginated event queue
-    GET    /api/v1/events/{id}     Retrieve single event
+    POST   /api/v1/events                  Ingest a security event
+    GET    /api/v1/events                  Paginated event queue
+    GET    /api/v1/events/{id}             Retrieve single event
+    PATCH  /api/v1/events/{id}/status      Lifecycle transition
+    POST   /api/v1/events/{id}/assess      Run deterministic assessment (Gate 8)
 
 Design notes:
 - Deduplication: if provider_event_id is set and an event with that ID
@@ -13,8 +15,9 @@ Design notes:
 - Normalisation: raw_metadata dict is serialised to JSON and stored.
   event_timestamp is passed through as-is (validated by Pydantic).
   Status advances RECEIVED → NORMALISED on successful persist.
-- The endpoint does NOT trigger agent assessment — that is Gate 7.
-  Status is left at NORMALISED after ingestion.
+- The /assess endpoint orchestrates the full deterministic pipeline:
+  EvidenceAggregator → RiskEngine → ConfidenceEngine → persist → state change.
+  LLM is NOT called here (Gate 14+).
 - All DB errors propagate as HTTP 500; structured error body returned.
 """
 
@@ -33,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.event import SecurityEvent
+from app.schemas.assessment import AssessEventRequest, AssessmentResponse
 from app.schemas.events import (
     VALID_STATUSES,
     ErrorDetail,
@@ -41,6 +45,7 @@ from app.schemas.events import (
     EventResponse,
 )
 from app.security.dependencies import require_permission
+from app.services.assessment_service import AssessmentService
 from app.services.event_lifecycle import InvalidTransitionError, validate_transition
 
 logger = structlog.get_logger(__name__)
@@ -427,3 +432,82 @@ async def update_event_status(
     )
 
     return EventResponse.from_orm_event(event)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/events/{event_id}/assess — Gate 8 assessment
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{event_id}/assess",
+    response_model=None,
+    status_code=200,
+    summary="Run deterministic risk & confidence assessment",
+    dependencies=[Depends(require_permission("events:decide"))],
+    responses={
+        200: {"description": "Assessment complete — returns AssessmentResponse"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Permission denied"},
+        404: {"description": "Event not found"},
+        409: {"description": "Event cannot be assessed from its current status"},
+        422: {"description": "Validation error"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def assess_event(
+    event_id: str,
+    body: AssessEventRequest | None = None,
+    session: AsyncSession = Depends(get_db),
+) -> AssessmentResponse:
+    """
+    Trigger the full deterministic assessment pipeline for a security event.
+
+    1. Validates the event exists and is in an assessable state.
+    2. Gathers evidence from all 6 context sources (EvidenceAggregator).
+    3. Runs the deterministic RiskEngine (ADR-003 — no LLM involvement).
+    4. Runs the independent ConfidenceEngine (ADR-004).
+    5. Persists RiskAssessment + ConfidenceAssessment rows.
+    6. Denormalises risk/confidence scores onto SecurityEvent.
+    7. Advances event status: normalised → assessing → awaiting_review.
+
+    Returns the full AssessmentResponse bundle.
+    """
+    payload = body or AssessEventRequest()
+
+    try:
+        service = AssessmentService(session)
+        result = await service.run(
+            event_id,
+            unavailable_source_ids=payload.unavailable_source_ids,
+            policy_version=payload.policy_version,
+        )
+    except ValueError as exc:
+        # Event not found or already terminal
+        msg = str(exc)
+        status_code = 404 if "not found" in msg.lower() else 409
+        raise HTTPException(
+            status_code=status_code,
+            detail=ErrorDetail(
+                code="ASSESSMENT_ERROR",
+                message=msg,
+            ).model_dump(),
+        ) from exc
+    except InvalidTransitionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=ErrorDetail(
+                code="INVALID_TRANSITION",
+                message=str(exc),
+            ).model_dump(),
+        ) from exc
+
+    logger.info(
+        "events.assess.complete",
+        event_id=event_id,
+        risk_score=result.risk_score,
+        risk_level=result.risk_level,
+        confidence_score=result.confidence_score,
+    )
+
+    return result

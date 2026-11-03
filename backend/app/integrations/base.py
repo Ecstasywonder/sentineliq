@@ -17,6 +17,7 @@ class BaseAdapter(ABC):
     #: Human-readable source identifier included in ToolMeta.source
     source_id: str = "unknown"
 
+    @abstractmethod
     async def health_check(self) -> dict:
         """
         Return a health dict compatible with IntegrationHealthRecord.

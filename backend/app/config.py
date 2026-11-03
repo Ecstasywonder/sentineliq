@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # Risk / Confidence engine
     # -------------------------------------------------------------------------
     active_risk_policy_version: str = "1.0"
+
+    # ADR-006: This value is RESERVED FOR FUTURE USE only.
+    # It MUST NOT be used to auto-dismiss, auto-close, or auto-approve any event.
+    # Any use for automated decision-making requires a new ADR and product-owner approval.
     min_confidence_auto_clear: float = 0.85
 
     # -------------------------------------------------------------------------

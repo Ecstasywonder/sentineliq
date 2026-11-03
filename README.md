@@ -34,8 +34,8 @@ SentinelIQ never autonomously enforces security actions.
 | 10 | Operator Decision API | `gate-10-operator-decision-api` → `main` | ✅ Complete | ~270 |
 | 11 | Escalation API | `gate-11-escalation-api` → `main` | ✅ Complete | ~304 |
 | 12 | Audit Trail API | `gate-12-audit-trail-api` → `main` | ✅ Complete | **313** |
-| 13 | Feedback API | `gate-13-feedback-api` | 🔲 Next | — |
-| 14 | Triage Agent (watsonx Orchestrate) | — | 🔲 Pending | — |
+| 13 | Feedback API | `gate-13-feedback-api` → `main` | ✅ Complete | **334** |
+| 14 | Triage Agent (watsonx Orchestrate) | `gate-14-triage-agent` | 🔲 Next | — |
 | 15 | Context Agent (watsonx Orchestrate) | — | 🔲 Pending | — |
 | 16 | Explanation Agent (watsonx Orchestrate) | — | 🔲 Pending | — |
 | 17 | Sentinel Coordinator (watsonx Orchestrate) | — | 🔲 Pending | — |
@@ -58,11 +58,11 @@ SentinelIQ never autonomously enforces security actions.
 | 34 | Security Hardening (SSO/OIDC, TLS, secrets) | — | 🔲 Pending | — |
 | 35 | Production Deployment Package | — | 🔲 Pending | — |
 
-**Current test suite: 313 passing · 93% coverage · ruff clean**
+**Current test suite: 334 passing · 93% coverage · ruff clean**
 
 ---
 
-## Live API Surface (Gates 5–12)
+## Live API Surface (Gates 5–13)
 
 | Method | Path | Gate | Description |
 |--------|------|------|-------------|
@@ -93,6 +93,8 @@ SentinelIQ never autonomously enforces security actions.
 | `GET` | `/api/v1/tools/location-policy` | 7 | Location policy / security rules |
 | `GET` | `/api/v1/tools/incident-history` | 7 | Prior incident history |
 | `GET` | `/api/v1/tools/integration-health` | 7 | Integration health status |
+| `POST` | `/api/v1/events/{id}/feedback` | 13 | Submit operator feedback |
+| `GET` | `/api/v1/events/{id}/feedback` | 13 | Retrieve all feedback for an event |
 | `GET` | `/health` | 2 | Application health check |
 
 ---

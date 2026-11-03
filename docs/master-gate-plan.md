@@ -35,8 +35,8 @@ Gates are executed in order. No gate is considered complete until:
 | **10** | Operator Decision API | ✅ Complete | `docs/gate-10-operator-decision-api.md` |
 | **11** | Escalation API | ✅ Complete | `docs/gate-11-escalation-api.md` |
 | **12** | Audit Trail API | ✅ Complete | `docs/gate-12-audit-trail-api.md` |
-| **13** | Feedback API | 🔲 Next | — |
-| **14** | Triage Agent (watsonx Orchestrate) | 🔲 Pending | — |
+| **13** | Feedback API | ✅ Complete | `docs/gate-13-feedback-api.md` |
+| **14** | Triage Agent (watsonx Orchestrate) | 🔲 Next | — |
 | **15** | Context Agent (watsonx Orchestrate) | 🔲 Pending | — |
 | **16** | Explanation Agent (watsonx Orchestrate) | 🔲 Pending | — |
 | **17** | Sentinel Coordinator (watsonx Orchestrate) | 🔲 Pending | — |
@@ -184,13 +184,27 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 13 — Feedback API (Next)
+## Gate 13 — Feedback API ✅
+
+**Branch:** `gate-13-feedback-api`
+**Deliverables:**
+- `POST /api/v1/events/{id}/feedback` — submit feedback (all fields optional, any status)
+- `GET /api/v1/events/{id}/feedback` — all feedback newest-first
+- `app/schemas/feedback.py` — `FeedbackRequest`, `FeedbackResponse`, `VALID_OUTCOMES`
+- `feedback_submitted` AuditEvent on every POST
+- 28 integration tests
+
+---
+
+## Gate 14 — Triage Agent / watsonx Orchestrate (Next)
 
 **Scope:**
-- `POST /api/v1/events/{id}/feedback` — submit feedback on an assessment
-- `GET /api/v1/events/{id}/feedback` — retrieve all feedback for an event
-- Feedback types: `correct_risk`, `incorrect_risk`, `missing_evidence`, `false_positive`, `other`
-- Audit trail entry on every submission
+- Requires watsonx Orchestrate tenant URL + API key in `backend/.env`
+- Define `triage_agent` in `agents/triage/`
+- Tool schemas for assessment endpoints
+- Integration test: Orchestrate invocation → backend response
+
+> **Action required before Gate 14:** Provide `ORCHESTRATE_URL` and `ORCHESTRATE_API_KEY`
 
 ---
 

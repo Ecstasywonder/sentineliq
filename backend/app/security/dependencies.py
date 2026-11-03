@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.user import User, UserRole, Role
+from app.models.user import Role, User, UserRole
 from app.security.rbac import has_permission
 from app.security.tokens import TokenError, decode_access_token
 
@@ -67,7 +67,7 @@ async def get_current_user(
     try:
         payload = decode_access_token(credentials.credentials)
     except TokenError:
-        raise credentials_exception
+        raise credentials_exception from None
 
     user_id: str | None = payload.get("sub")
     if not user_id:

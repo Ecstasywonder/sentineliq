@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import (
 from app.config import get_settings
 from app.db.session import Base, get_db
 from app.main import app
-from app.security.dependencies import AuthenticatedUser, get_current_user
 from app.models.user import User
+from app.security.dependencies import AuthenticatedUser, get_current_user
 
 settings = get_settings()
 

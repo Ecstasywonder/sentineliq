@@ -20,7 +20,12 @@ from app.models.user import Role, User, UserRole
 from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse, UserInfo
 from app.security.dependencies import CurrentUser
 from app.security.passwords import verify_password
-from app.security.tokens import TokenError, create_access_token, create_refresh_token, decode_refresh_token
+from app.security.tokens import (
+    TokenError,
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+)
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -115,7 +120,7 @@ async def refresh(
     try:
         user_id = decode_refresh_token(body.refresh_token)
     except TokenError:
-        raise _401
+        raise _401 from None
 
     user: User | None = await session.get(User, user_id)
     if user is None or not user.is_active:

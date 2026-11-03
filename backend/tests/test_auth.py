@@ -20,11 +20,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.main import app
 from app.models.user import Role, User, UserRole
 from app.security.dependencies import AuthenticatedUser, get_current_user
 from app.security.passwords import hash_password, verify_password
@@ -36,7 +37,6 @@ from app.security.tokens import (
     decode_access_token,
     decode_refresh_token,
 )
-from app.main import app
 
 
 def _id() -> str:
@@ -338,8 +338,6 @@ async def test_events_endpoint_forbidden_for_insufficient_role(
     A user with only 'audit_reviewer' (events:read only) cannot POST events
     (requires events:ingest).
     """
-    from httpx import ASGITransport, AsyncClient as AC
-
     # Build a stub with audit_reviewer only
     stub_user = User(
         id=_id(), email="limited@test.com", full_name="Limited",
@@ -348,7 +346,7 @@ async def test_events_endpoint_forbidden_for_insufficient_role(
     limited_auth = AuthenticatedUser(user=stub_user, roles=["audit_reviewer"])
 
     app.dependency_overrides[get_current_user] = lambda: limited_auth
-    async with AC(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/events",
             json={

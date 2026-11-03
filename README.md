@@ -20,7 +20,7 @@ SentinelIQ never autonomously enforces security actions. Human authority over ev
 | 0 | Environment & source-of-truth validation | ✅ Complete |
 | 1 | BRD, SOP & architecture specification | ✅ Complete |
 | 2 | Repository scaffold & developer foundation | ✅ Complete |
-| 3 | Database & domain model | 🔲 Pending |
+| 3 | Database & domain model | ✅ Complete |
 | 4 | Security-event simulator | 🔲 Pending |
 | 5 | Event ingestion & event queue backend | 🔲 Pending |
 | 6 | Evidence-source services | 🔲 Pending |

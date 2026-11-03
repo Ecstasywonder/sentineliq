@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import all models so Alembic can detect them
 from app.db.session import Base  # noqa: F401
+import app.models  # noqa: F401 — registers all tables with Base.metadata
 from app.config import get_settings
 
 # Alembic Config object

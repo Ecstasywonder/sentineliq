@@ -32,8 +32,8 @@ Gates are executed in order. No gate is considered complete until:
 | **7** | Evidence Retrieval API (Context Tools) | ✅ Complete | `docs/gate-7-evidence-retrieval.md` |
 | **8** | Evidence Aggregation Service | ✅ Complete | `docs/gate-8-assessment-api.md` |
 | **9** | Risk Assessment API | ✅ Complete | `docs/gate-9-risk-assessment-api.md` |
-| **10** | Operator Decision API | 🔲 Next | — |
-| **11** | Escalation API | 🔲 Pending | — |
+| **10** | Operator Decision API | ✅ Complete | `docs/gate-10-operator-decision-api.md` |
+| **11** | Escalation API | 🔲 Next | — |
 | **12** | Audit Trail API | 🔲 Pending | — |
 | **13** | Feedback API | 🔲 Pending | — |
 | **14** | Triage Agent (watsonx Orchestrate) | 🔲 Pending | — |
@@ -143,14 +143,29 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 10 — Operator Decision API (Next)
+## Gate 10 — Operator Decision API ✅
+
+**Branch:** `gate-10-operator-decision-api`
+**Deliverables:**
+- `POST /api/v1/events/{id}/decision` — record operator accept/reject/dismiss/escalate/override/request_context
+- `GET /api/v1/events/{id}/decision` — latest decision
+- `GET /api/v1/events/{id}/decisions` — full decision history
+- `app/schemas/decision.py` — `DecisionRequest`, `DecisionResponse`, `DecisionListResponse`
+- `app/services/decision_service.py` — `DecisionService` with AuditEvent creation
+- 32 integration tests — all 6 decision types, audit trail, error cases
+- CI/CD pipeline hardened: `ci-gate` aggregate job, `--cov-fail-under=85`, all gate-* branches triggered
+- `.github/workflows/ci.yml` — root-level CI file (required by GitHub Actions)
+
+---
+
+## Gate 11 — Escalation API (Next)
 
 **Scope:**
-- `POST /api/v1/events/{id}/decision` — record operator approve/dismiss/escalate
-- `GET /api/v1/events/{id}/decision` — retrieve persisted decision
-- Decision model: `operator_decisions` table, notes, reviewer identity
-- Status machine: `awaiting_review` → `approved` | `dismissed` | `escalated`
-- Audit trail entry on every decision
+- `POST /api/v1/events/{id}/escalation` — create escalation record
+- `GET /api/v1/events/{id}/escalation` — retrieve escalation
+- `PATCH /api/v1/events/{id}/escalation` — update escalation status (resolve/close)
+- `Escalation` model: `escalations` table (Gate 3)
+- Audit trail entry on every escalation state change
 
 ---
 
@@ -179,3 +194,4 @@ Gates are executed in order. No gate is considered complete until:
 | 7 | ~50 (tools API + aggregator) | ~194 | TBC |
 | 8 | 14 (assessment API round-trip) | ~208 | TBC |
 | 9 | 30 (retrieval + factors + risk policies) | ~238 | TBC |
+| 10 | 32 (decision API — all 6 types, audit trail, errors) | ~270 | TBC |

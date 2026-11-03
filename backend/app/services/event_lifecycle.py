@@ -26,7 +26,7 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
     "received": frozenset({"normalised", "failed"}),
     "normalised": frozenset({"assessing", "failed"}),
     "assessing": frozenset({"awaiting_review", "context_incomplete", "failed"}),
-    "awaiting_review": frozenset({"dismissed", "closed", "escalated", "assessing"}),
+    "awaiting_review": frozenset({"dismissed", "closed", "escalated", "assessing", "context_incomplete"}),
     "context_incomplete": frozenset({"awaiting_review", "failed", "assessing"}),
     "escalated": frozenset({"closed", "awaiting_review"}),
     # Terminal states — no further transitions

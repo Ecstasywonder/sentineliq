@@ -17,6 +17,7 @@ from app.config import get_settings
 
 settings = get_settings()
 
+
 # ---------------------------------------------------------------------------
 # Engine
 # Pool arguments are only valid for PostgreSQL/MySQL, not SQLite.

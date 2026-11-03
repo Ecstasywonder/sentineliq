@@ -204,7 +204,7 @@ class EscalationService:
         row = await self.get_latest(event_id)
         if row is None:
             raise ValueError(
-                f"No escalation found for event '{event_id}'."
+                f"Escalation not found for event '{event_id}'."
             )
 
         # Validate escalation status transition

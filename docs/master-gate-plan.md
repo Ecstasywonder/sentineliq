@@ -33,8 +33,8 @@ Gates are executed in order. No gate is considered complete until:
 | **8** | Evidence Aggregation Service | ✅ Complete | `docs/gate-8-assessment-api.md` |
 | **9** | Risk Assessment API | ✅ Complete | `docs/gate-9-risk-assessment-api.md` |
 | **10** | Operator Decision API | ✅ Complete | `docs/gate-10-operator-decision-api.md` |
-| **11** | Escalation API | 🔲 Next | — |
-| **12** | Audit Trail API | 🔲 Pending | — |
+| **11** | Escalation API | ✅ Complete | `docs/gate-11-escalation-api.md` |
+| **12** | Audit Trail API | 🔲 Next | — |
 | **13** | Feedback API | 🔲 Pending | — |
 | **14** | Triage Agent (watsonx Orchestrate) | 🔲 Pending | — |
 | **15** | Context Agent (watsonx Orchestrate) | 🔲 Pending | — |
@@ -158,14 +158,26 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 11 — Escalation API (Next)
+## Gate 11 — Escalation API ✅
+
+**Branch:** `gate-11-escalation-api`
+**Deliverables:**
+- `POST /api/v1/events/{id}/escalation` — create escalation record
+- `GET /api/v1/events/{id}/escalation` — retrieve latest escalation
+- `PATCH /api/v1/events/{id}/escalation` — acknowledge / resolve / cancel
+- `app/schemas/escalation.py` — `EscalationCreateRequest`, `EscalationUpdateRequest`, `EscalationResponse`
+- `app/services/escalation_service.py` — `EscalationService` with full lifecycle + audit trail
+- `decision_service.py` updated — auto-creates escalation row on `escalate` decision
+- 34 integration tests
+
+---
+
+## Gate 12 — Audit Trail API (Next)
 
 **Scope:**
-- `POST /api/v1/events/{id}/escalation` — create escalation record
-- `GET /api/v1/events/{id}/escalation` — retrieve escalation
-- `PATCH /api/v1/events/{id}/escalation` — update escalation status (resolve/close)
-- `Escalation` model: `escalations` table (Gate 3)
-- Audit trail entry on every escalation state change
+- `GET /api/v1/events/{id}/audit` — full audit trail for a single event
+- `GET /api/v1/audit` — global audit trail with filtering (actor, action, date range)
+- Read-only — no write endpoints (audit trail is INSERT-only by design)
 
 ---
 
@@ -195,3 +207,4 @@ Gates are executed in order. No gate is considered complete until:
 | 8 | 14 (assessment API round-trip) | ~208 | TBC |
 | 9 | 30 (retrieval + factors + risk policies) | ~238 | TBC |
 | 10 | 32 (decision API — all 6 types, audit trail, errors) | ~270 | TBC |
+| 11 | 34 (escalation lifecycle, auto-create, audit) | ~304 | 93% |

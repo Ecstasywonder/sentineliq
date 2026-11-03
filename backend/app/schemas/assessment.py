@@ -85,6 +85,24 @@ class AssessmentResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class AssessmentFactorsResponse(BaseModel):
+    """
+    Per-factor breakdown for a persisted assessment.
+
+    Returned by GET /api/v1/events/{id}/assessment/factors.
+    Each item carries the same fields as RiskFactorDetail plus a human-readable
+    description sourced from the RiskPolicyFactor definition row.
+    """
+
+    assessment_id: str
+    event_id: str
+    risk_policy_version: str
+    risk_score: float
+    risk_level: str
+    factors: list[RiskFactorDetail]
+    assessed_at: str
+
+
 class AssessmentRetrievalResponse(BaseModel):
     """
     Assessment bundle read from persisted DB rows.

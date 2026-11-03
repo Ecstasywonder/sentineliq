@@ -31,8 +31,8 @@ Gates are executed in order. No gate is considered complete until:
 | **6** | RBAC & Authentication | ✅ Complete | `docs/gate-6-rbac-auth.md` |
 | **7** | Evidence Retrieval API (Context Tools) | ✅ Complete | `docs/gate-7-evidence-retrieval.md` |
 | **8** | Evidence Aggregation Service | ✅ Complete | `docs/gate-8-assessment-api.md` |
-| **9** | Risk Assessment API | 🔲 Next | — |
-| **10** | Operator Decision API | 🔲 Pending | — |
+| **9** | Risk Assessment API | ✅ Complete | `docs/gate-9-risk-assessment-api.md` |
+| **10** | Operator Decision API | 🔲 Next | — |
 | **11** | Escalation API | 🔲 Pending | — |
 | **12** | Audit Trail API | 🔲 Pending | — |
 | **13** | Feedback API | 🔲 Pending | — |
@@ -131,12 +131,26 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 9 — Risk Assessment API (Next)
+## Gate 9 — Risk Assessment API ✅
+
+**Deliverables:**
+- `GET /api/v1/events/{id}/assessment` — full risk + confidence bundle from DB rows
+- `GET /api/v1/events/{id}/assessment/factors` — focused per-factor breakdown
+- `GET /api/v1/risk-policies` — list all policy versions
+- `GET /api/v1/risk-policies/{id}` — single policy with factor definitions
+- `app/schemas/assessment.py` — `AssessmentFactorsResponse`, `AssessmentRetrievalResponse`, `RiskPolicyResponse`
+- 30 integration tests across 3 test files
+
+---
+
+## Gate 10 — Operator Decision API (Next)
 
 **Scope:**
-- `GET /api/v1/events/{id}/assessment` — retrieve persisted assessment for an event
-- `GET /api/v1/events/{id}/assessment/factors` — per-factor breakdown
-- Optional: `POST /api/v1/events/{id}/assess/retry` for failed assessments
+- `POST /api/v1/events/{id}/decision` — record operator approve/dismiss/escalate
+- `GET /api/v1/events/{id}/decision` — retrieve persisted decision
+- Decision model: `operator_decisions` table, notes, reviewer identity
+- Status machine: `awaiting_review` → `approved` | `dismissed` | `escalated`
+- Audit trail entry on every decision
 
 ---
 
@@ -164,3 +178,4 @@ Gates are executed in order. No gate is considered complete until:
 | 6 | 31 (auth + RBAC) | 144 | 90% |
 | 7 | ~50 (tools API + aggregator) | ~194 | TBC |
 | 8 | 14 (assessment API round-trip) | ~208 | TBC |
+| 9 | 30 (retrieval + factors + risk policies) | ~238 | TBC |

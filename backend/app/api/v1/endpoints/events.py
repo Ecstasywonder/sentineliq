@@ -38,6 +38,7 @@ from app.db.session import get_db
 from app.models.event import SecurityEvent
 from app.schemas.assessment import (
     AssessEventRequest,
+    AssessmentFactorsResponse,
     AssessmentResponse,
     AssessmentRetrievalResponse,
     ConfidenceReductionDetail,
@@ -620,4 +621,86 @@ async def get_assessment(
         sources_required=conf_row.sources_required if conf_row else 0,
         assessed_at=risk_row.assessed_at,
         agent_run_id=risk_row.agent_run_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/events/{event_id}/assessment/factors — Gate 9 factor breakdown
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{event_id}/assessment/factors",
+    response_model=AssessmentFactorsResponse,
+    summary="Per-factor risk breakdown for a persisted assessment",
+    dependencies=[Depends(require_permission("events:read"))],
+    responses={
+        200: {"description": "Factor breakdown found"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Permission denied"},
+        404: {"description": "Event or assessment not found"},
+    },
+)
+async def get_assessment_factors(
+    event_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> AssessmentFactorsResponse:
+    """
+    Return the per-factor risk breakdown for a security event's latest assessment.
+
+    This is a focused view of the same data returned by
+    ``GET /events/{id}/assessment``, limited to the risk factors only —
+    useful for UI panels that only need to display the factor contribution
+    bars without the full confidence/evidence context.
+
+    Returns 404 if the event does not exist or has never been assessed.
+    """
+    import json as _json
+
+    from sqlalchemy import select
+
+    from app.models.assessment import RiskAssessment
+
+    # Verify event exists
+    event: SecurityEvent | None = await session.get(SecurityEvent, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code="EVENT_NOT_FOUND",
+                message=f"Event '{event_id}' not found.",
+            ).model_dump(),
+        )
+
+    # Load risk assessment row
+    stmt = select(RiskAssessment).where(RiskAssessment.event_id == event_id)
+    result = await session.execute(stmt)
+    risk_row: RiskAssessment | None = result.scalar_one_or_none()
+    if risk_row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code="ASSESSMENT_NOT_FOUND",
+                message=f"No assessment found for event '{event_id}'. "
+                "Run POST /events/{id}/assess first.",
+            ).model_dump(),
+        )
+
+    # Deserialise stored factor JSON
+    factors: list[RiskFactorDetail] = []
+    if risk_row.risk_factors_json:
+        try:
+            for f in _json.loads(risk_row.risk_factors_json):
+                factors.append(RiskFactorDetail(**f))
+        except (ValueError, KeyError):
+            pass  # degrade gracefully
+
+    return AssessmentFactorsResponse(
+        assessment_id=risk_row.id,
+        event_id=event_id,
+        risk_policy_version=risk_row.risk_policy_version,
+        risk_score=risk_row.risk_score,
+        risk_level=risk_row.risk_level,
+        factors=factors,
+        assessed_at=risk_row.assessed_at,
     )

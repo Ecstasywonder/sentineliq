@@ -26,10 +26,10 @@ This register records all assumptions made during the design and implementation 
 
 | ID | Assumption | Gate | Impact if Wrong | Owner | Status |
 |----|-----------|------|----------------|-------|--------|
-| A-01 | EC2 runs Ubuntu 22.04 LTS or 24.04 LTS | 0 | Bootstrap script may need OS-specific adjustments | Project Owner | Open |
-| A-02 | EC2 has outbound internet access for apt/pip/npm | 0–2 | Bootstrap fails; offline mirror needed | Project Owner | Open |
-| A-03 | EC2 has ≥4 GB RAM, ≥20 GB disk, ≥2 vCPU | 0–2 | Performance degradation; instance resize required | Project Owner | Open |
-| A-04 | Docker can be installed on the EC2 instance | 2 | Container workflow fails; bare-metal install needed | Project Owner | Open |
+| A-01 | EC2 runs Ubuntu 22.04 LTS or 24.04 LTS | 0 | Bootstrap script may need OS-specific adjustments | Project Owner | Confirmed — Ubuntu (ip-172-31-18-119) |
+| A-02 | EC2 has outbound internet access for apt/pip/npm | 0–2 | Bootstrap fails; offline mirror needed | Project Owner | Confirmed — all packages installed successfully |
+| A-03 | EC2 has ≥4 GB RAM, ≥20 GB disk, ≥2 vCPU | 0–2 | Performance degradation; instance resize required | Project Owner | Confirmed — 7.6 GiB RAM, 61G disk, 58G free |
+| A-04 | Docker can be installed on the EC2 instance | 2 | Container workflow fails; bare-metal install needed | Project Owner | Confirmed — Docker 29.9.2 installed |
 | A-05 | EC2 security group allows inbound SSH (port 22) | 0 | Cannot connect | Project Owner | Confirmed |
 | A-06 | EC2 security group allows inbound port 8000 for dev | 2 | Cannot test backend from developer machine | Project Owner | Open |
 

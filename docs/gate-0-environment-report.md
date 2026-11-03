@@ -55,24 +55,27 @@ IBM Bob (local)          Git Repository          EC2 Server
 **Connection:** `ssh -i ~/.ssh/"test key.pem" ubuntu@98.81.243.2`  
 **Expected OS:** Ubuntu (AWS EC2, likely Ubuntu 22.04 LTS or 24.04 LTS)
 
-### Required EC2 Runtimes (to be installed via bootstrap script)
+### EC2 Environment — Confirmed ✅
 
-| Runtime | Required Version | Purpose |
-|---------|-----------------|---------|
-| Python | 3.11+ | Backend (FastAPI) |
-| pip / uv | Latest | Python package management |
-| Node.js | 20 LTS | Frontend (React/Vite) |
-| npm | 10+ | Frontend packages |
-| Docker Engine | 25+ | Container runtime |
-| Docker Compose | v2 (plugin) | Multi-service orchestration |
-| PostgreSQL | 15+ (via Docker) | Operational database |
-| Git | 2.x | Already present on EC2 likely |
-| curl / jq | Latest | Scripting utilities |
+**Instance:** AWS EC2 — `ubuntu@ip-172-31-18-119` (98.81.243.2)
+**Verified:** 2026-11-03
 
-### EC2 Bootstrap Script
+| Runtime | Version Found | Required | Status |
+|---------|--------------|----------|--------|
+| Python | 3.14.4 | 3.11+ | ✅ |
+| Node.js | v20.20.2 | 20 LTS | ✅ |
+| npm | 10.8.2 | 10+ | ✅ |
+| Docker Engine | 29.9.2 | 25+ | ✅ |
+| Docker Compose | v5.7.0 | v2+ | ✅ |
+| Git | 2.53.0 | 2.x | ✅ |
+| uv | 0.13.7 | latest | ✅ |
+| Disk (/) | 61G total / 58G free | ≥20G | ✅ |
+| RAM | 7.6 GiB / 7.0 GiB avail | ≥4G | ✅ |
 
-Located at: `infra/docker/bootstrap-ec2.sh`  
-Run once on a fresh EC2 Ubuntu instance to install all required runtimes.
+**Notes:**
+- Python 3.14.4 exceeds minimum requirement; package compatibility will be verified per gate
+- PostgreSQL will run in Docker (not yet installed — Gate 2)
+- No swap configured — acceptable for MVP development workload
 
 ---
 

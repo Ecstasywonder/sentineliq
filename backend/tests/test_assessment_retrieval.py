@@ -20,7 +20,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.assessment import ConfidenceAssessment, RiskAssessment
+from app.models.assessment import RiskAssessment
 from app.models.event import SecurityEvent
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
 
@@ -259,9 +259,7 @@ class TestGetAssessmentReassess:
         # First assess
         r1 = await client.post(f"/api/v1/events/{event.id}/assess")
         assert r1.status_code == 200
-        first_assessed_at = (
-            await client.get(f"/api/v1/events/{event.id}/assessment")
-        ).json()["assessed_at"]
+        await client.get(f"/api/v1/events/{event.id}/assessment")
 
         # Reset status for re-assess
         event.status = "normalised"

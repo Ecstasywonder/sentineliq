@@ -44,7 +44,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PT", "RUF"]
-ignore = ["E501", "RUF005"]
+# B008: FastAPI's dependency injection uses Depends() in function signatures by design
+ignore = ["E501", "RUF005", "B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

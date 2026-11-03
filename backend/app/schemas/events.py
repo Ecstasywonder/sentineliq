@@ -61,7 +61,7 @@ class EventIngestRequest(BaseModel):
         default=None,
         ge=0.0,
         le=1.0,
-        description="Detection confidence from the upstream detector (0–1).",
+        description="Detection confidence from the upstream detector (0-1).",
     )
     thumbnail_url: str | None = Field(default=None, max_length=512)
     raw_metadata: dict[str, Any] | None = Field(
@@ -128,7 +128,7 @@ class EventResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     @classmethod
-    def from_orm_event(cls, event: object) -> "EventResponse":
+    def from_orm_event(cls, event: object) -> EventResponse:
         """Build an EventResponse from a SecurityEvent ORM instance."""
         from app.models.event import SecurityEvent
 

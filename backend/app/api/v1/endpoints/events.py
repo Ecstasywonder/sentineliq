@@ -34,11 +34,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.event import SecurityEvent
 from app.schemas.events import (
+    VALID_STATUSES,
     ErrorDetail,
     EventIngestRequest,
     EventListResponse,
     EventResponse,
-    VALID_STATUSES,
 )
 from app.services.event_lifecycle import InvalidTransitionError, validate_transition
 

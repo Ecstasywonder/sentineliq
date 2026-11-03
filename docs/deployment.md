@@ -29,15 +29,18 @@ curl http://localhost:8000/ready
 ```bash
 cd ~/sentineliq/backend
 
+# Install python3.14-venv (required for venv on Ubuntu with Python 3.14)
+sudo apt-get install -y python3.14-venv
+
 # Create virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies (including dev/test extras)
-pip install uv
-uv pip install -e ".[dev]"
+# uv is already in ~/.local/bin from bootstrap — ensure it's on PATH
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-# Install aiosqlite for in-memory test DB
+# Install dependencies (including dev/test extras) + aiosqlite for tests
+uv pip install -e ".[dev]"
 uv pip install aiosqlite
 
 # Run tests
@@ -48,36 +51,32 @@ DATABASE_URL_SYNC="sqlite:///:memory:" \
 pytest tests/ -v
 ```
 
+## Running Backend Lint (via uv tools)
+
+```bash
+cd ~/sentineliq/backend
+source .venv/bin/activate
+
+# ruff is installed as part of [dev] extras — run via python -m
+python -m ruff check app tests
+python -m ruff format --check app tests
+
+# mypy
+python -m mypy app --ignore-missing-imports
+```
+
 ## Running Frontend Tests (on EC2, without Docker)
 
 ```bash
 cd ~/sentineliq/frontend
 
-# Install dependencies
-npm ci
+# Generate package-lock.json first (required for npm ci)
+npm install
 
-# Run unit tests
-npm run test:unit
-
-# Type check
+# Now run tests and build
 npm run typecheck
-
-# Build
+npm run test:unit
 npm run build
-```
-
-## Running Linting
-
-```bash
-# Backend
-cd ~/sentineliq/backend
-ruff check app tests
-ruff format --check app tests
-
-# Frontend
-cd ~/sentineliq/frontend
-npm run lint
-npm run format:check
 ```
 
 ## Docker Compose Operations
@@ -107,6 +106,7 @@ docker compose -f infra/docker/docker-compose.yml exec backend alembic upgrade h
 
 # Or directly on EC2 with venv active
 cd ~/sentineliq/backend
+source .venv/bin/activate
 alembic upgrade head
 ```
 

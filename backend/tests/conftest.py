@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import (
 from app.config import get_settings
 from app.db.session import Base, get_db
 from app.main import app
+from app.security.dependencies import AuthenticatedUser, get_current_user
+from app.models.user import User
 
 settings = get_settings()
 
@@ -59,14 +61,34 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
         await session.rollback()
 
 
+# ---------------------------------------------------------------------------
+# Stub superuser — bypasses real JWT/DB auth for all route tests.
+# Has every permission via platform_admin role.
+# ---------------------------------------------------------------------------
+_STUB_USER = User(
+    id="test-user-001",
+    email="test@sentineliq.test",
+    full_name="Test User",
+    hashed_password="$2b$12$unused",
+    is_active=True,
+    is_verified=True,
+)
+_STUB_AUTH = AuthenticatedUser(user=_STUB_USER, roles=["platform_admin"])
+
+
+def _override_auth() -> AuthenticatedUser:
+    return _STUB_AUTH
+
+
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    """Async test client with overridden DB session."""
+    """Async test client with overridden DB session and stub auth."""
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = _override_auth
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

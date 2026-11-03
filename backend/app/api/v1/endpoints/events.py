@@ -40,6 +40,7 @@ from app.schemas.events import (
     EventListResponse,
     EventResponse,
 )
+from app.security.dependencies import require_permission
 from app.services.event_lifecycle import InvalidTransitionError, validate_transition
 
 logger = structlog.get_logger(__name__)
@@ -109,9 +110,12 @@ async def _find_duplicate(
     status_code=201,
     response_model=EventResponse,
     summary="Ingest a security event",
+    dependencies=[Depends(require_permission("events:ingest"))],
     responses={
         201: {"description": "Event created and normalised"},
         200: {"description": "Duplicate event — returning existing record"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Permission denied"},
         422: {"description": "Validation error"},
         500: {"description": "Internal server error"},
     },
@@ -216,6 +220,7 @@ async def ingest_event(
     "",
     response_model=EventListResponse,
     summary="List security events (event queue)",
+    dependencies=[Depends(require_permission("events:read"))],
 )
 async def list_events(
     status: str | None = Query(
@@ -322,8 +327,11 @@ async def list_events(
     "/{event_id}",
     response_model=EventResponse,
     summary="Retrieve a single security event",
+    dependencies=[Depends(require_permission("events:read"))],
     responses={
         200: {"description": "Event found"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Permission denied"},
         404: {"description": "Event not found"},
     },
 )
@@ -358,8 +366,11 @@ class StatusTransitionRequest(BaseModel):
     "/{event_id}/status",
     response_model=EventResponse,
     summary="Advance event lifecycle status",
+    dependencies=[Depends(require_permission("events:decide"))],
     responses={
         200: {"description": "Status updated"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Permission denied"},
         404: {"description": "Event not found"},
         409: {"description": "Invalid transition"},
         422: {"description": "Unknown status"},

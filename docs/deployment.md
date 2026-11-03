@@ -172,3 +172,51 @@ DATABASE_URL_SYNC="sqlite:///:memory:" \
 | `GET` | `/api/v1/events/{id}` | Retrieve single event by ID |
 | `PATCH` | `/api/v1/events/{id}/status` | Advance event lifecycle status |
 
+
+## Running Gate 6 Tests — Auth & RBAC
+
+```bash
+cd ~/sentineliq/backend
+source .venv/bin/activate
+
+APP_ENV=development \
+SECRET_KEY=test-secret-key \
+DATABASE_URL="sqlite+aiosqlite:///:memory:" \
+DATABASE_URL_SYNC="sqlite:///:memory:" \
+  pytest tests/test_auth.py -v
+
+# Full suite
+APP_ENV=development \
+SECRET_KEY=test-secret-key \
+DATABASE_URL="sqlite+aiosqlite:///:memory:" \
+DATABASE_URL_SYNC="sqlite:///:memory:" \
+  pytest tests/ -v
+```
+
+## Gate 6 Auth Endpoints
+
+| Method | Path | Auth Required | Description |
+|--------|------|--------------|-------------|
+| `POST` | `/api/v1/auth/token` | No | Login — returns access + refresh tokens |
+| `POST` | `/api/v1/auth/refresh` | No | Exchange refresh token for new access token |
+| `GET` | `/api/v1/auth/me` | Yes (Bearer) | Return current user identity |
+
+## Testing with a Real Token (on EC2, after seeding)
+
+```bash
+# Seed the database first
+cd ~/sentineliq/backend
+source .venv/bin/activate
+DATABASE_URL="postgresql+asyncpg://sentineliq:changeme_dev_only@localhost:5432/sentineliq" \
+  python -m app.db.seed
+
+# Login and capture token
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@sentineliq.dev","password":"changeme"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+# Use token
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/events
+```
+

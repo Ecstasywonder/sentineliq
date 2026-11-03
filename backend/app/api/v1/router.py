@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.v1.endpoints import auth as auth_router
 from app.api.v1.endpoints import events as events_router
 from app.api.v1.endpoints import health as health_router
 
@@ -14,6 +15,13 @@ api_v1_router.include_router(
     health_router.router,
     prefix="/system",
     tags=["System"],
+)
+
+# Auth — login, refresh, me
+api_v1_router.include_router(
+    auth_router.router,
+    prefix="/auth",
+    tags=["Auth"],
 )
 
 # Events — ingestion, queue, lifecycle

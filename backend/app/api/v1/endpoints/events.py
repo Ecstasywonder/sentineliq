@@ -36,7 +36,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.event import SecurityEvent
-from app.schemas.assessment import AssessEventRequest, AssessmentResponse
+from app.schemas.assessment import (
+    AssessEventRequest,
+    AssessmentResponse,
+    AssessmentRetrievalResponse,
+    ConfidenceReductionDetail,
+    RiskFactorDetail,
+)
 from app.schemas.events import (
     VALID_STATUSES,
     ErrorDetail,
@@ -511,3 +517,107 @@ async def assess_event(
     )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/events/{event_id}/assessment — Gate 9 retrieval
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{event_id}/assessment",
+    response_model=AssessmentRetrievalResponse,
+    summary="Retrieve persisted risk & confidence assessment",
+    dependencies=[Depends(require_permission("events:read"))],
+    responses={
+        200: {"description": "Assessment found"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Permission denied"},
+        404: {"description": "Event or assessment not found"},
+    },
+)
+async def get_assessment(
+    event_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> AssessmentRetrievalResponse:
+    """
+    Retrieve the persisted assessment for a security event.
+
+    Returns the full risk & confidence breakdown stored after
+    ``POST /events/{id}/assess`` was called.  The response is built
+    from the ``risk_assessments`` and ``confidence_assessments`` DB rows —
+    no re-computation occurs.
+
+    Returns 404 if the event does not exist or has never been assessed.
+    """
+    import json as _json
+
+    from sqlalchemy import select
+
+    from app.models.assessment import ConfidenceAssessment, RiskAssessment
+
+    # Verify event exists
+    event: SecurityEvent | None = await session.get(SecurityEvent, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code="EVENT_NOT_FOUND",
+                message=f"Event '{event_id}' not found.",
+            ).model_dump(),
+        )
+
+    # Load risk assessment row
+    stmt = select(RiskAssessment).where(RiskAssessment.event_id == event_id)
+    result = await session.execute(stmt)
+    risk_row: RiskAssessment | None = result.scalar_one_or_none()
+    if risk_row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code="ASSESSMENT_NOT_FOUND",
+                message=f"No assessment found for event '{event_id}'. "
+                "Run POST /events/{id}/assess first.",
+            ).model_dump(),
+        )
+
+    # Load confidence assessment row
+    conf_stmt = select(ConfidenceAssessment).where(
+        ConfidenceAssessment.event_id == event_id
+    )
+    conf_result = await session.execute(conf_stmt)
+    conf_row: ConfidenceAssessment | None = conf_result.scalar_one_or_none()
+
+    # Deserialise stored factor JSON
+    risk_factors: list[RiskFactorDetail] = []
+    if risk_row.risk_factors_json:
+        try:
+            for f in _json.loads(risk_row.risk_factors_json):
+                risk_factors.append(RiskFactorDetail(**f))
+        except (ValueError, KeyError):
+            pass  # degrade gracefully — DB row may predate schema change
+
+    # Deserialise stored confidence reductions JSON
+    conf_reductions: list[ConfidenceReductionDetail] = []
+    if conf_row and conf_row.reductions_json:
+        try:
+            for r in _json.loads(conf_row.reductions_json):
+                conf_reductions.append(ConfidenceReductionDetail(**r))
+        except (ValueError, KeyError):
+            pass
+
+    return AssessmentRetrievalResponse(
+        assessment_id=risk_row.id,
+        event_id=event_id,
+        risk_policy_version=risk_row.risk_policy_version,
+        risk_score=risk_row.risk_score,
+        risk_level=risk_row.risk_level,
+        risk_factors=risk_factors,
+        confidence_score=conf_row.confidence_score if conf_row else risk_row.confidence_score or 0.0,
+        confidence_level=conf_row.confidence_level if conf_row else risk_row.confidence_level or "low",
+        confidence_reductions=conf_reductions,
+        sources_available=conf_row.sources_available if conf_row else 0,
+        sources_required=conf_row.sources_required if conf_row else 0,
+        assessed_at=risk_row.assessed_at,
+        agent_run_id=risk_row.agent_run_id,
+    )

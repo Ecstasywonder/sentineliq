@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import auth as auth_router
 from app.api.v1.endpoints import events as events_router
 from app.api.v1.endpoints import health as health_router
+from app.api.v1.endpoints import risk_policies as risk_policies_router
 from app.api.v1.endpoints import tools as tools_router
 
 api_v1_router = APIRouter()
@@ -25,7 +26,7 @@ api_v1_router.include_router(
     tags=["Auth"],
 )
 
-# Events — ingestion, queue, lifecycle
+# Events — ingestion, queue, lifecycle, assessment (Gates 5, 8, 9)
 api_v1_router.include_router(
     events_router.router,
     prefix="/events",
@@ -37,4 +38,11 @@ api_v1_router.include_router(
     tools_router.router,
     prefix="/tools",
     tags=["Tools"],
+)
+
+# Risk Policies — read-only policy & factor inspection (Gate 9)
+api_v1_router.include_router(
+    risk_policies_router.router,
+    prefix="/risk-policies",
+    tags=["Risk Policies"],
 )

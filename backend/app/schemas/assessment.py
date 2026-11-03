@@ -79,3 +79,69 @@ class AssessmentResponse(BaseModel):
     evidence_errors: dict[str, str]
 
     assessed_at: str
+
+
+# ---------------------------------------------------------------------------
+# GET /events/{id}/assessment — persisted assessment retrieval (Gate 9)
+# ---------------------------------------------------------------------------
+
+
+class AssessmentRetrievalResponse(BaseModel):
+    """
+    Assessment bundle read from persisted DB rows.
+
+    Returned by GET /api/v1/events/{id}/assessment.
+    Does not include live evidence errors (those are stored separately);
+    returns the stored factor breakdown and confidence reductions from JSON.
+    """
+
+    assessment_id: str
+    event_id: str
+    risk_policy_version: str
+    risk_score: float
+    risk_level: str
+    risk_factors: list[RiskFactorDetail]
+
+    confidence_score: float
+    confidence_level: str
+    confidence_reductions: list[ConfidenceReductionDetail]
+    sources_available: int
+    sources_required: int
+
+    assessed_at: str
+    agent_run_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# GET /risk-policies — Risk Policy API (Gate 9)
+# ---------------------------------------------------------------------------
+
+
+class RiskPolicyFactorResponse(BaseModel):
+    """Single factor within a risk policy."""
+
+    factor_id: str
+    label: str
+    weight: float
+    direction: str
+    is_active: bool
+    description: str | None = None
+
+
+class RiskPolicyResponse(BaseModel):
+    """Single risk policy with its factors."""
+
+    id: str
+    version: str
+    name: str
+    description: str | None = None
+    is_active: bool
+    effective_from: str | None = None
+    factors: list[RiskPolicyFactorResponse]
+
+
+class RiskPolicyListResponse(BaseModel):
+    """Paginated list of risk policies."""
+
+    items: list[RiskPolicyResponse]
+    total: int

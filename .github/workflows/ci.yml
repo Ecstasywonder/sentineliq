@@ -1,0 +1,177 @@
+name: SentinelIQ CI
+
+# ---------------------------------------------------------------------------
+# Triggers
+# ---------------------------------------------------------------------------
+# - Every push to any branch runs the full suite (catches gate branches).
+# - Every PR targeting main is required to pass before merge.
+# - Merge to main is only allowed via PR — direct pushes are blocked
+#   by the GitHub branch-protection rule documented in docs/deployment.md.
+# ---------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - main
+      - "gate-*"       # all gate-N-* feature branches
+      - "feature/**"
+      - "fix/**"
+      - "hotfix/**"
+  pull_request:
+    branches:
+      - main            # every PR into main must pass CI
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend — lint, format, type-check, tests, coverage
+  # This job is declared as REQUIRED in the GitHub branch-protection rule.
+  # No merge to main is possible if this job fails.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Install aiosqlite (in-memory test DB driver)
+        run: uv pip install --system aiosqlite
+
+      - name: Lint — ruff check
+        run: ruff check app/ tests/
+
+      - name: Format check — ruff format
+        run: ruff format --check app/ tests/
+
+      - name: Type check — mypy
+        run: mypy app --ignore-missing-imports
+        continue-on-error: true   # advisory until stubs are complete (Gate 31)
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ \
+            --tb=short \
+            -q \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=85
+        env:
+          APP_ENV: development
+          SECRET_KEY: ci-test-secret-key-not-for-production
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          DATABASE_URL_SYNC: sqlite:///:memory:
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: backend/coverage.xml
+          flags: backend
+        continue-on-error: true   # non-blocking; coverage gate enforced above
+
+  # ---------------------------------------------------------------------------
+  # Frontend — type-check, lint, unit tests, build
+  # Skipped (with warning) when frontend/ has no package.json yet.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check frontend scaffold exists
+        id: fe_check
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::frontend/package.json not found — skipping frontend CI (Gate 21+)"
+          fi
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        if: steps.fe_check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.fe_check.outputs.exists == 'true'
+        run: npm ci
+
+      - name: Type check
+        if: steps.fe_check.outputs.exists == 'true'
+        run: npm run typecheck
+
+      - name: Lint
+        if: steps.fe_check.outputs.exists == 'true'
+        run: npm run lint
+
+      - name: Run unit tests
+        if: steps.fe_check.outputs.exists == 'true'
+        run: npm run test:unit
+
+      - name: Build
+        if: steps.fe_check.outputs.exists == 'true'
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Security — secret scanning (gitleaks)
+  # ---------------------------------------------------------------------------
+  security:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history required for accurate scan
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true   # advisory in MVP; must be BLOCKING before production (Gate 34)
+
+  # ---------------------------------------------------------------------------
+  # Gate guard — aggregate required job
+  # This is the SINGLE job name registered in GitHub branch-protection
+  # "Required status checks".  It only passes when backend passes.
+  # Frontend + security are desirable but not blocking (they have their own
+  # continue-on-error or skip logic).
+  # ---------------------------------------------------------------------------
+  ci-gate:
+    name: CI Gate (required for merge)
+    needs: [backend]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check required jobs passed
+        run: |
+          if [ "${{ needs.backend.result }}" != "success" ]; then
+            echo "❌ Backend job failed or was cancelled — merge blocked."
+            exit 1
+          fi
+          echo "✅ All required checks passed — merge allowed."

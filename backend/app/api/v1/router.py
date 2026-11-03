@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth as auth_router
+from app.api.v1.endpoints import decisions as decisions_router
 from app.api.v1.endpoints import events as events_router
 from app.api.v1.endpoints import health as health_router
 from app.api.v1.endpoints import risk_policies as risk_policies_router
@@ -31,6 +32,14 @@ api_v1_router.include_router(
     events_router.router,
     prefix="/events",
     tags=["Events"],
+)
+
+# Operator Decisions — record & retrieve human decisions (Gate 10)
+# Mounted under /events so paths resolve to /events/{id}/decision(s)
+api_v1_router.include_router(
+    decisions_router.router,
+    prefix="/events",
+    tags=["Decisions"],
 )
 
 # Context tools — evidence retrieval (Gate 7, ADR-005 read-only adapters)

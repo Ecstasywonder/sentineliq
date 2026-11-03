@@ -206,6 +206,21 @@ async def _seed_user(
     return user
 
 
+def _auth_client(db_session: AsyncSession):
+    """
+    Context manager: a raw AsyncClient with only the DB overridden.
+    No stub auth — used to test real auth routes (login, refresh).
+    """
+    from collections.abc import AsyncGenerator
+    from app.db.session import get_db
+
+    async def _override_db() -> AsyncGenerator:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
 @pytest.mark.asyncio
 async def test_login_happy_path(db_session: AsyncSession) -> None:
     """Correct credentials return access + refresh tokens."""
@@ -213,15 +228,12 @@ async def test_login_happy_path(db_session: AsyncSession) -> None:
     await _seed_user(db_session, email, "goodpassword")
     await db_session.commit()
 
-    # Call directly with no auth override (use app directly)
-    from httpx import ASGITransport, AsyncClient
-
-    app.dependency_overrides = {}  # clear overrides for this test
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with _auth_client(db_session) as ac:
         resp = await ac.post(
             "/api/v1/auth/token",
             json={"email": email, "password": "goodpassword"},
         )
+    app.dependency_overrides.clear()
     assert resp.status_code == 200
     body = resp.json()
     assert "access_token" in body
@@ -237,25 +249,25 @@ async def test_login_wrong_password(db_session: AsyncSession) -> None:
     await _seed_user(db_session, email, "rightpass")
     await db_session.commit()
 
-    app.dependency_overrides = {}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with _auth_client(db_session) as ac:
         resp = await ac.post(
             "/api/v1/auth/token",
             json={"email": email, "password": "wrongpass"},
         )
+    app.dependency_overrides.clear()
     assert resp.status_code == 401
     assert resp.json()["detail"]["code"] == "INVALID_CREDENTIALS"
 
 
 @pytest.mark.asyncio
-async def test_login_unknown_email() -> None:
-    """Unknown email returns 401 (not 404 — prevents user enumeration)."""
-    app.dependency_overrides = {}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+async def test_login_unknown_email(db_session: AsyncSession) -> None:
+    """Unknown email returns 401 (not 404 -- prevents user enumeration)."""
+    async with _auth_client(db_session) as ac:
         resp = await ac.post(
             "/api/v1/auth/token",
             json={"email": "nobody@nowhere.com", "password": "pass"},
         )
+    app.dependency_overrides.clear()
     assert resp.status_code == 401
 
 
@@ -266,12 +278,12 @@ async def test_login_disabled_account(db_session: AsyncSession) -> None:
     await _seed_user(db_session, email, "pass", is_active=False)
     await db_session.commit()
 
-    app.dependency_overrides = {}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with _auth_client(db_session) as ac:
         resp = await ac.post(
             "/api/v1/auth/token",
             json={"email": email, "password": "pass"},
         )
+    app.dependency_overrides.clear()
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "ACCOUNT_DISABLED"
 
@@ -284,25 +296,25 @@ async def test_refresh_token_issues_new_access(db_session: AsyncSession) -> None
     await db_session.commit()
 
     refresh = create_refresh_token(user.id)
-    app.dependency_overrides = {}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with _auth_client(db_session) as ac:
         resp = await ac.post(
             "/api/v1/auth/refresh",
             json={"refresh_token": refresh},
         )
+    app.dependency_overrides.clear()
     assert resp.status_code == 200
     assert "access_token" in resp.json()
 
 
 @pytest.mark.asyncio
-async def test_refresh_invalid_token() -> None:
+async def test_refresh_invalid_token(db_session: AsyncSession) -> None:
     """Garbage refresh token returns 401."""
-    app.dependency_overrides = {}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with _auth_client(db_session) as ac:
         resp = await ac.post(
             "/api/v1/auth/refresh",
             json={"refresh_token": "not.a.token"},
         )
+    app.dependency_overrides.clear()
     assert resp.status_code == 401
 
 

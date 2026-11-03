@@ -29,7 +29,6 @@ from app.services.confidence_engine import (
     _classify_confidence,
 )
 
-
 # ---------------------------------------------------------------------------
 # _classify_confidence unit tests (pure, no DB, no async)
 # ---------------------------------------------------------------------------

@@ -19,7 +19,6 @@ import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-
 # ---------------------------------------------------------------------------
 # Reduction catalogue
 # ---------------------------------------------------------------------------

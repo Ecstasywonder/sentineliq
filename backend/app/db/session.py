@@ -1,8 +1,10 @@
 """Database session management."""
+
 from __future__ import annotations
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -10,7 +12,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import text
 
 from app.config import get_settings
 
@@ -68,5 +69,5 @@ async def check_db_connection() -> tuple[bool, str]:
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
         return True, "connected"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, str(exc)

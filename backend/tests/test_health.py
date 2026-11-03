@@ -2,6 +2,7 @@
 Tests for health and readiness endpoints.
 These are the first passing tests for Gate 2.
 """
+
 from __future__ import annotations
 
 import pytest

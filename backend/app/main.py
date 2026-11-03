@@ -8,21 +8,22 @@ Responsibilities:
 - Startup / shutdown lifecycle hooks
 - Health and readiness endpoints
 """
+
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import get_settings
-from app.db.session import engine, check_db_connection
-from app.logging_config import configure_logging
 from app.api.v1.router import api_v1_router
+from app.config import get_settings
+from app.db.session import check_db_connection, engine
+from app.logging_config import configure_logging
 
 settings = get_settings()
 configure_logging()
@@ -83,9 +84,7 @@ def create_app() -> FastAPI:
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         if settings.app_env == "production":
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
     # -----------------------------------------------------------------------

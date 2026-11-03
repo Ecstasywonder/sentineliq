@@ -1,10 +1,11 @@
 """
 Pytest configuration and shared fixtures for SentinelIQ backend tests.
 """
+
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -15,9 +16,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.main import app
-from app.db.session import Base, get_db
 from app.config import get_settings
+from app.db.session import Base, get_db
+from app.main import app
 
 settings = get_settings()
 

@@ -2,6 +2,7 @@
 System health endpoint — additional API-level detail.
 The primary /health and /ready endpoints live in app/main.py.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter

@@ -9,6 +9,7 @@ from app.api.v1.endpoints import auth as auth_router
 from app.api.v1.endpoints import decisions as decisions_router
 from app.api.v1.endpoints import escalations as escalations_router
 from app.api.v1.endpoints import events as events_router
+from app.api.v1.endpoints import feedback as feedback_router
 from app.api.v1.endpoints import health as health_router
 from app.api.v1.endpoints import risk_policies as risk_policies_router
 from app.api.v1.endpoints import tools as tools_router
@@ -57,6 +58,13 @@ api_v1_router.include_router(
     audit_router.router,
     prefix="",
     tags=["Audit"],
+)
+
+# Feedback — operator quality feedback (Gate 13)
+api_v1_router.include_router(
+    feedback_router.router,
+    prefix="/events",
+    tags=["Feedback"],
 )
 
 # Context tools — evidence retrieval (Gate 7, ADR-005 read-only adapters)

@@ -34,7 +34,9 @@ class RiskPolicyFactor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     factor_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     weight: Mapped[float] = mapped_column(Float, nullable=False)
-    direction: Mapped[str] = mapped_column(String(32), nullable=False)  # increases_risk / decreases_risk
+    direction: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # increases_risk / decreases_risk
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

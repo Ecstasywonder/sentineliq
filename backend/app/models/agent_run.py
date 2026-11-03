@@ -40,7 +40,7 @@ class ToolCall(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     started_at: Mapped[str] = mapped_column(String(32), nullable=False)
     completed_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
     duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
-    input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)   # redacted safe summary
+    input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # redacted safe summary
     output_evidence_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

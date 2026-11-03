@@ -16,7 +16,9 @@ class WorkOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     facility_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     location_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    work_order_number: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    work_order_number: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     scheduled_start: Mapped[str] = mapped_column(String(32), nullable=False)

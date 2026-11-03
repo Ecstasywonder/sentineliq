@@ -8,7 +8,7 @@ the in-memory SQLite test database.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -16,20 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import all models to ensure they register with Base.metadata
 import app.models  # noqa: F401
-from app.models.facility import Camera, Facility, Location
-from app.models.user import Role, User, UserRole
+from app.models.agent_run import AgentRun, ToolCall
+from app.models.assessment import RiskAssessment
+from app.models.audit import AuditEvent
+from app.models.decision import OperatorDecision
 from app.models.event import SecurityEvent
 from app.models.evidence import EventEvidence
-from app.models.assessment import RiskAssessment
-from app.models.recommendation import Recommendation
-from app.models.decision import OperatorDecision
-from app.models.escalation import Escalation
-from app.models.audit import AuditEvent
-from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
+from app.models.facility import Camera, Facility, Location
 from app.models.incident import IncidentHistory
 from app.models.integration import IntegrationHealth
-from app.models.feedback import Feedback
-from app.models.agent_run import AgentRun, ToolCall
+from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
+from app.models.user import Role, User
 
 
 def _id() -> str:
@@ -37,7 +34,7 @@ def _id() -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -156,15 +153,22 @@ async def test_security_event_default_status(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_event_evidence_create(db_session: AsyncSession) -> None:
     event = SecurityEvent(
-        id=_id(), event_type="person_detected",
-        event_timestamp=_now(), location_id="DOCK", status="assessing",
+        id=_id(),
+        event_type="person_detected",
+        event_timestamp=_now(),
+        location_id="DOCK",
+        status="assessing",
     )
     db_session.add(event)
     await db_session.flush()
 
     evidence = EventEvidence(
-        id=_id(), event_id=event.id, evidence_code="ACCESS-Q-001",
-        source="access_control", status="verified", retrieved_at=_now(),
+        id=_id(),
+        event_id=event.id,
+        evidence_code="ACCESS-Q-001",
+        source="access_control",
+        status="verified",
+        retrieved_at=_now(),
     )
     db_session.add(evidence)
     await db_session.flush()
@@ -181,16 +185,22 @@ async def test_event_evidence_create(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_risk_assessment_create(db_session: AsyncSession) -> None:
     event = SecurityEvent(
-        id=_id(), event_type="person_detected",
-        event_timestamp=_now(), location_id="DOCK", status="assessing",
+        id=_id(),
+        event_type="person_detected",
+        event_timestamp=_now(),
+        location_id="DOCK",
+        status="assessing",
     )
     db_session.add(event)
     await db_session.flush()
 
     assessment = RiskAssessment(
-        id=_id(), event_id=event.id,
-        risk_policy_version="1.0", risk_score=78.0,
-        risk_level="critical", assessed_at=_now(),
+        id=_id(),
+        event_id=event.id,
+        risk_policy_version="1.0",
+        risk_score=78.0,
+        risk_level="critical",
+        assessed_at=_now(),
     )
     db_session.add(assessment)
     await db_session.flush()
@@ -208,16 +218,22 @@ async def test_risk_assessment_create(db_session: AsyncSession) -> None:
 async def test_operator_decision_requires_event(db_session: AsyncSession) -> None:
     """A decision must be linked to an event — no orphan decisions."""
     event = SecurityEvent(
-        id=_id(), event_type="person_detected",
-        event_timestamp=_now(), location_id="DOCK", status="awaiting_review",
+        id=_id(),
+        event_type="person_detected",
+        event_timestamp=_now(),
+        location_id="DOCK",
+        status="awaiting_review",
     )
     db_session.add(event)
     await db_session.flush()
 
     decision = OperatorDecision(
-        id=_id(), event_id=event.id,
-        decided_by="user-001", decided_by_role="officer",
-        decision="escalate", decided_at=_now(),
+        id=_id(),
+        event_id=event.id,
+        decided_by="user-001",
+        decided_by_role="officer",
+        decision="escalate",
+        decided_at=_now(),
     )
     db_session.add(decision)
     await db_session.flush()
@@ -234,15 +250,20 @@ async def test_operator_decision_requires_event(db_session: AsyncSession) -> Non
 @pytest.mark.asyncio
 async def test_audit_event_create(db_session: AsyncSession) -> None:
     event = SecurityEvent(
-        id=_id(), event_type="person_detected",
-        event_timestamp=_now(), location_id="DOCK", status="received",
+        id=_id(),
+        event_type="person_detected",
+        event_timestamp=_now(),
+        location_id="DOCK",
+        status="received",
     )
     db_session.add(event)
     await db_session.flush()
 
     audit = AuditEvent(
-        id=_id(), event_id=event.id,
-        action="event_received", actor="system",
+        id=_id(),
+        event_id=event.id,
+        action="event_received",
+        actor="system",
         occurred_at=_now(),
     )
     db_session.add(audit)
@@ -262,7 +283,9 @@ async def test_risk_policy_and_factors(db_session: AsyncSession) -> None:
     import json
 
     policy = RiskPolicy(
-        id=_id(), version=f"test-{_id()[:8]}", name="Test Policy",
+        id=_id(),
+        version=f"test-{_id()[:8]}",
+        name="Test Policy",
         is_active=True,
         thresholds_json=json.dumps({"low": {"min": 0, "max": 24}}),
     )
@@ -270,9 +293,12 @@ async def test_risk_policy_and_factors(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     factor = RiskPolicyFactor(
-        id=_id(), policy_id=policy.id,
-        factor_id="no_badge", label="No badge found",
-        weight=25.0, direction="increases_risk",
+        id=_id(),
+        policy_id=policy.id,
+        factor_id="no_badge",
+        label="No badge found",
+        weight=25.0,
+        direction="increases_risk",
     )
     db_session.add(factor)
     await db_session.flush()
@@ -289,9 +315,12 @@ async def test_risk_policy_and_factors(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_incident_history_create(db_session: AsyncSession) -> None:
     incident = IncidentHistory(
-        id=_id(), location_id="LOADING_DOCK_3",
-        incident_code=f"INC-{_id()[:8]}", incident_type="after_hours_presence",
-        severity="high", occurred_at="2026-10-15T23:12:00Z",
+        id=_id(),
+        location_id="LOADING_DOCK_3",
+        incident_code=f"INC-{_id()[:8]}",
+        incident_type="after_hours_presence",
+        severity="high",
+        occurred_at="2026-10-15T23:12:00Z",
         description="Test incident description.",
     )
     db_session.add(incident)
@@ -308,8 +337,10 @@ async def test_incident_history_create(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_integration_health_create(db_session: AsyncSession) -> None:
     ih = IntegrationHealth(
-        id=_id(), source_id=f"test_src_{_id()[:8]}",
-        name="Test Source", status="healthy",
+        id=_id(),
+        source_id=f"test_src_{_id()[:8]}",
+        name="Test Source",
+        status="healthy",
     )
     db_session.add(ih)
     await db_session.flush()
@@ -325,16 +356,21 @@ async def test_integration_health_create(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_agent_run_and_tool_call(db_session: AsyncSession) -> None:
     run = AgentRun(
-        id=_id(), agent_name="triage_agent",
-        status="completed", started_at=_now(),
+        id=_id(),
+        agent_name="triage_agent",
+        status="completed",
+        started_at=_now(),
     )
     db_session.add(run)
     await db_session.flush()
 
     tool = ToolCall(
-        id=_id(), agent_run_id=run.id,
+        id=_id(),
+        agent_run_id=run.id,
         tool_name="get_access_events",
-        status="success", started_at=_now(), sequence=0,
+        status="success",
+        started_at=_now(),
+        sequence=0,
     )
     db_session.add(tool)
     await db_session.flush()
@@ -351,17 +387,23 @@ async def test_agent_run_and_tool_call(db_session: AsyncSession) -> None:
 async def test_event_with_evidence_query(db_session: AsyncSession) -> None:
     event_id = _id()
     event = SecurityEvent(
-        id=event_id, event_type="person_detected",
-        event_timestamp=_now(), location_id="DOCK", status="assessing",
+        id=event_id,
+        event_type="person_detected",
+        event_timestamp=_now(),
+        location_id="DOCK",
+        status="assessing",
     )
     db_session.add(event)
     await db_session.flush()
 
     for i in range(3):
         ev = EventEvidence(
-            id=_id(), event_id=event_id,
-            evidence_code=f"EV-{i:03d}", source=f"source_{i}",
-            status="verified", retrieved_at=_now(),
+            id=_id(),
+            event_id=event_id,
+            evidence_code=f"EV-{i:03d}",
+            source=f"source_{i}",
+            status="verified",
+            retrieved_at=_now(),
         )
         db_session.add(ev)
     await db_session.flush()

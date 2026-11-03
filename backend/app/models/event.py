@@ -102,10 +102,10 @@ class SecurityEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
-    from app.models.evidence import EventEvidence
     from app.models.assessment import RiskAssessment
-    from app.models.recommendation import Recommendation
+    from app.models.audit import AuditEvent
     from app.models.decision import OperatorDecision
     from app.models.escalation import Escalation
-    from app.models.audit import AuditEvent
+    from app.models.evidence import EventEvidence
     from app.models.feedback import Feedback
+    from app.models.recommendation import Recommendation

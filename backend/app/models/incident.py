@@ -25,4 +25,6 @@ class IncidentHistory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Embedding stored as JSON array for MVP; replaced by vector column in production
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # populated at query time
+    similarity_score: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )  # populated at query time

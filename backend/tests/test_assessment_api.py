@@ -413,7 +413,7 @@ class TestAssessEventErrorCases:
         """Non-existent event_id must return 404."""
         resp = await client.post("/api/v1/events/does-not-exist/assess")
         assert resp.status_code == 404
-        assert resp.json()["code"] == "ASSESSMENT_ERROR"
+        assert resp.json()["detail"]["code"] == "ASSESSMENT_ERROR"
 
     async def test_409_for_terminal_event(
         self, client: AsyncClient, db_session: AsyncSession

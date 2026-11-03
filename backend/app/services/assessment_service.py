@@ -28,7 +28,7 @@ from app.models.assessment import ConfidenceAssessment, RiskAssessment
 from app.models.event import SecurityEvent
 from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
-from app.services.event_lifecycle import InvalidTransitionError, validate_transition
+from app.services.event_lifecycle import validate_transition
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.risk_engine import FactorSignal, RiskEngine
 
@@ -206,7 +206,7 @@ class AssessmentService:
             raise ValueError(f"Event '{event_id}' not found.")
         return event
 
-    def _build_signals(self, evidence, event: SecurityEvent) -> list[FactorSignal]:  # noqa: ANN001
+    def _build_signals(self, evidence, event: SecurityEvent) -> list[FactorSignal]:
         """
         Derive FactorSignal list from gathered evidence.
 
@@ -316,7 +316,7 @@ class AssessmentService:
 
     def _build_source_statuses(
         self,
-        evidence,  # noqa: ANN001
+        evidence,
         extra_unavailable: set[str],
     ) -> list[SourceStatus]:
         """Map aggregated evidence sections to SourceStatus for ConfidenceEngine."""
@@ -349,8 +349,8 @@ class AssessmentService:
     async def _persist_assessments(
         self,
         event_id: str,
-        risk_result,  # noqa: ANN001
-        conf_result,  # noqa: ANN001
+        risk_result,
+        conf_result,
         assessed_at: str,
     ) -> None:
         """

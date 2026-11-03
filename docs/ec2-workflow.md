@@ -50,8 +50,9 @@ Then run the following block in one shot (copy-paste the whole thing):
 ```bash
 cd ~/sentineliq && \
 git pull origin main && \
+source backend/.venv/bin/activate && \
 cd backend && \
-uv pip install --system -e ".[dev]" -q && \
+/home/ubuntu/.local/bin/uv pip install -e ".[dev]" -q && \
 echo "=== RUFF ===" && \
 ruff check app tests && \
 echo "=== PYTEST ===" && \
@@ -69,7 +70,10 @@ Paste the output back to IBM Bob for gate sign-off.
 
 ## First-Time EC2 Setup (one time only)
 
-If the repo has not been cloned on EC2 yet:
+Repo is already cloned at `~/sentineliq`. Venv exists at `~/sentineliq/backend/.venv`.
+`uv` is at `~/.local/bin/uv` (not on default PATH — use full path or activate venv first).
+
+If re-cloning from scratch:
 
 ```bash
 ssh -i "sentinelIq.pem" ubuntu@ec2-54-164-137-222.compute-1.amazonaws.com
@@ -78,7 +82,9 @@ ssh -i "sentinelIq.pem" ubuntu@ec2-54-164-137-222.compute-1.amazonaws.com
 cd ~
 git clone https://github.com/Ecstasywonder/sentineliq.git sentineliq
 cd sentineliq/backend
-uv pip install --system -e ".[dev]"
+python3 -m venv .venv
+source .venv/bin/activate
+/home/ubuntu/.local/bin/uv pip install -e ".[dev]"
 ```
 
 ---
@@ -97,14 +103,13 @@ git push origin main
 
 **EC2 test block:**
 ```bash
-cd ~/sentineliq && git pull origin main && cd backend && \
-uv pip install --system -e ".[dev]" -q && \
+cd ~/sentineliq && git pull origin main && \
+source backend/.venv/bin/activate && cd backend && \
 ruff check app tests && \
 APP_ENV=development SECRET_KEY=ci-test-secret-key \
 DATABASE_URL="sqlite+aiosqlite:///:memory:" \
 DATABASE_URL_SYNC="sqlite:///:memory:" \
-pytest tests/test_assessment_api.py tests/test_evidence_aggregator.py \
-  tests/test_risk_engine.py tests/test_confidence_engine.py -v --tb=short
+pytest tests/ -v --tb=short
 ```
 
 **Expected:** All tests green, ruff exits 0.
@@ -123,7 +128,7 @@ pytest tests/test_assessment_api.py tests/test_evidence_aggregator.py \
 ssh -i "sentinelIq.pem" ubuntu@ec2-54-164-137-222.compute-1.amazonaws.com
 
 # On EC2:
-cd ~/sentineliq/backend
+source ~/sentineliq/backend/.venv/bin/activate && cd ~/sentineliq/backend
 APP_ENV=development SECRET_KEY=ci-test-secret-key \
 DATABASE_URL="sqlite+aiosqlite:///:memory:" \
 DATABASE_URL_SYNC="sqlite:///:memory:" \
@@ -135,7 +140,7 @@ pytest tests/test_assessment_api.py -v --tb=long
 ## Full Suite (all gates)
 
 ```bash
-cd ~/sentineliq/backend && \
+source ~/sentineliq/backend/.venv/bin/activate && cd ~/sentineliq/backend && \
 APP_ENV=development SECRET_KEY=ci-test-secret-key \
 DATABASE_URL="sqlite+aiosqlite:///:memory:" \
 DATABASE_URL_SYNC="sqlite:///:memory:" \

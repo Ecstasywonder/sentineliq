@@ -35,7 +35,7 @@ from app.schemas.decision import (
     DecisionResponse,
 )
 from app.security.dependencies import AuthenticatedUser
-from app.services.event_lifecycle import InvalidTransitionError, validate_transition
+from app.services.event_lifecycle import validate_transition
 
 logger = structlog.get_logger(__name__)
 

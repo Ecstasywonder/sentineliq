@@ -24,10 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.event import SecurityEvent
 from app.schemas.decision import (
+    VALID_DECISIONS,
     DecisionListResponse,
     DecisionRequest,
     DecisionResponse,
-    VALID_DECISIONS,
 )
 from app.schemas.events import ErrorDetail
 from app.security.dependencies import AuthenticatedUser, require_permission

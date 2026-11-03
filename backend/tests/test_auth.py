@@ -17,6 +17,7 @@ Tests cover:
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -25,6 +26,7 @@ from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.db.session import get_db
 from app.main import app
 from app.models.user import Role, User, UserRole
 from app.security.dependencies import AuthenticatedUser, get_current_user
@@ -211,8 +213,6 @@ def _auth_client(db_session: AsyncSession):
     Context manager: a raw AsyncClient with only the DB overridden.
     No stub auth — used to test real auth routes (login, refresh).
     """
-    from collections.abc import AsyncGenerator
-    from app.db.session import get_db
 
     async def _override_db() -> AsyncGenerator:
         yield db_session

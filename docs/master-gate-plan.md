@@ -29,8 +29,8 @@ Gates are executed in order. No gate is considered complete until:
 | **4** | Deterministic Risk Engine & Confidence Engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
 | **5** | Event Ingestion API | ✅ Complete | `docs/gate-5-event-ingestion-api.md` |
 | **6** | RBAC & Authentication | ✅ Complete | `docs/gate-6-rbac-auth.md` |
-| **7** | Evidence Retrieval API (Context Tools) | 🔲 Next | — |
-| **8** | Evidence Aggregation Service | 🔲 Pending | — |
+| **7** | Evidence Retrieval API (Context Tools) | ✅ Complete | `docs/gate-7-evidence-retrieval.md` |
+| **8** | Evidence Aggregation Service | 🔲 Next | — |
 | **9** | Risk Assessment API | 🔲 Pending | — |
 | **10** | Operator Decision API | 🔲 Pending | — |
 | **11** | Escalation API | 🔲 Pending | — |
@@ -103,26 +103,29 @@ Gates are executed in order. No gate is considered complete until:
 - `POST /api/v1/auth/token` — JWT login (HS256, bcrypt passwords)
 - `POST /api/v1/auth/refresh` — token rotation
 - `GET /api/v1/auth/me` — caller identity
-- 8 roles, 9 permissions, all events endpoints guarded
-- ~143 tests expected after lint fixes land
+- 8 roles, 9 permissions, `tools:read` added to all roles
+- 144 tests, 90% coverage, ruff clean
+
+### Gate 7 — Evidence Retrieval API (Context Tools)
+- Abstract adapter base classes: `BaseAdapter`, `AccessControlAdapter`, `ScheduleAdapter`, `WorkOrderAdapter`, `DeliveryAdapter`
+- 4 mock concrete adapters backed by application DB tables
+- `EvidenceAggregator` service — gathers all 7 evidence sources, error-isolated
+- 7 read-only endpoints under `/api/v1/tools/` (ADR-005):
+  - `GET access-events`, `GET schedule`, `GET work-orders`, `GET delivery`
+  - `GET location-policy`, `GET incident-history`, `GET integration-health`
+- `tools:read` permission required on all endpoints
+- `app/schemas/tools.py` — full Pydantic response models + `AggregatedEvidence` preview shape
+- Tests: `test_tools_api.py` + `test_evidence_aggregator.py` added
 
 ---
 
-## Gate 7 — Evidence Retrieval API (Next)
+## Gate 8 — Evidence Aggregation Service (Next)
 
 **Scope:**
-- Mock adapter implementations: `AccessControlAdapter`, `ScheduleAdapter`, `WorkOrderAdapter`, `DeliveryAdapter`
-- Context tool endpoints under `/api/v1/tools/`:
-  - `GET access-events` — badge/access query
-  - `GET schedule` — schedule context
-  - `GET work-orders` — active work orders
-  - `GET delivery` — delivery schedule
-  - `GET location-policy` — security rules for a location
-  - `GET incident-history` — recent incident search
-  - `GET integration-health` — adapter health status
-- Evidence aggregator service
-- All tools are **read-only** (ADR-005)
-- Integration tests for all 7 tools
+- Wire `EvidenceAggregator` to `POST /api/v1/events/{id}/assess` trigger
+- Persist `AggregatedEvidence` bundle into `event_evidence` table
+- Return evidence bundle as part of assessment response
+- Integration tests: full assess→evidence round-trip
 
 ---
 
@@ -147,4 +150,5 @@ Gates are executed in order. No gate is considered complete until:
 | 3 | 16 (model tests) | 16 | — |
 | 4 | 58 (risk + confidence) | 74 | 88% |
 | 5 | 39 (events API + lifecycle) | 113 | 90% |
-| 6 | ~30 (auth + RBAC) | ~143 | TBC |
+| 6 | 31 (auth + RBAC) | 144 | 90% |
+| 7 | ~50 (tools API + aggregator) | ~194 | TBC |

@@ -24,6 +24,7 @@ _ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "events:read",
         "events:decide",
         "events:escalate",
+        "tools:read",
     }),
     "supervisor": frozenset({
         "events:read",
@@ -31,14 +32,17 @@ _ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "events:escalate",
         "events:override",
         "audit:read",
+        "tools:read",
     }),
     "response_team": frozenset({
         "events:read",
         "events:decide",
+        "tools:read",
     }),
     "facility_manager": frozenset({
         "events:read",
         "audit:read",
+        "tools:read",
     }),
     "security_admin": frozenset({
         "events:read",
@@ -48,10 +52,12 @@ _ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "events:override",
         "audit:read",
         "admin:policy",
+        "tools:read",
     }),
     "audit_reviewer": frozenset({
         "events:read",
         "audit:read",
+        "tools:read",
     }),
     "platform_admin": frozenset({
         "events:read",
@@ -63,11 +69,13 @@ _ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "admin:users",
         "admin:policy",
         "admin:agents",
+        "tools:read",
     }),
     "agent_admin": frozenset({
         "events:read",
         "audit:read",
         "admin:agents",
+        "tools:read",
     }),
 }
 

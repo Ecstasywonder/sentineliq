@@ -16,6 +16,7 @@ agents (Gate 14+).  This service is purely deterministic.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.assessment import ConfidenceAssessment, RiskAssessment
+from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
@@ -148,6 +150,24 @@ class AssessmentService:
         validate_transition(event.status, "awaiting_review")
         event.status = "awaiting_review"
         self._session.add(event)
+
+        # Write immutable audit trail entry for the assessment
+        self._session.add(AuditEvent(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            action="risk_assessed",
+            actor="system:assessment_service",
+            occurred_at=assessed_at,
+            details_json=json.dumps({
+                "risk_score": risk_result.risk_score,
+                "risk_level": risk_result.risk_level,
+                "confidence_score": conf_result.confidence_score,
+                "confidence_level": conf_result.confidence_level,
+                "sources_available": conf_result.sources_available,
+                "evidence_errors": list(evidence.errors.keys()),
+            }),
+        ))
+
         await self._session.flush()
 
         logger.info(

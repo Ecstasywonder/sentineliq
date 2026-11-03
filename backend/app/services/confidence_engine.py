@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ from enum import Enum
 # ---------------------------------------------------------------------------
 
 
-class ConfidenceReduction(str, Enum):
+class ConfidenceReduction(StrEnum):
     """
     Enumeration of all defined confidence reduction reasons.
 

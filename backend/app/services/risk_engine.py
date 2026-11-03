@@ -19,9 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import structlog
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger(__name__)
 
@@ -137,7 +135,7 @@ class RiskEngine:
     ``Settings.active_risk_policy_version``.
     """
 
-    def __init__(self, session: "AsyncSession") -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def assess(
@@ -156,9 +154,10 @@ class RiskEngine:
         Returns:
             RiskResult with score, level, and per-factor breakdown.
         """
+        from sqlalchemy import select
+
         from app.config import get_settings
         from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
-        from sqlalchemy import select
 
         if policy_version is None:
             policy_version = get_settings().active_risk_policy_version

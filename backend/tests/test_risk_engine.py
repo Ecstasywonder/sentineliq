@@ -1,11 +1,11 @@
 """
-Risk Engine tests — Gate 4.
+Risk Engine tests -- Gate 4.
 
 Tests cover:
-- All five required demo scenarios (Scenarios A–E from the BRD)
+- All five required demo scenarios (Scenarios A-E from the BRD)
 - Zero-signal baseline
 - Unknown signal ignored (no exception)
-- Policy not found → safe fallback
+- Policy not found -> safe fallback
 - Score clamping at upper bound
 - factors_json serialisation round-trip
 - _classify_risk with custom thresholds
@@ -116,9 +116,17 @@ class TestClassifyRisk:
         assert _classify_risk(200.0, self._thresholds()) == "critical"
 
     def test_custom_thresholds(self):
-        custom = {"critical": {"min": 10, "max": None}, "low": {"min": 0, "max": 9}}
-        assert _classify_risk(10.0, custom) == "critical"
-        assert _classify_risk(9.0, custom) == "low"
+        # Fully-specified threshold dict with all four levels
+        custom = {
+            "critical": {"min": 75, "max": None},
+            "high":     {"min": 50, "max": 74},
+            "medium":   {"min": 25, "max": 49},
+            "low":      {"min": 0,  "max": 24},
+        }
+        assert _classify_risk(75.0, custom) == "critical"
+        assert _classify_risk(50.0, custom) == "high"
+        assert _classify_risk(25.0, custom) == "medium"
+        assert _classify_risk(0.0,  custom) == "low"
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +211,7 @@ async def test_scenario_c_missing_evidence(db_session: AsyncSession) -> None:
     ]
     result = await engine.assess(signals, policy_version="1.0-c")
 
-    # 40 → LOW boundary missed; 40 is between 25–49 → MEDIUM
+    # 40 -> LOW boundary missed; 40 is between 25-49 -> MEDIUM
     assert result.risk_score == 40.0
     assert result.risk_level == "medium"
 
@@ -314,7 +322,7 @@ async def test_score_clamped_at_upper_bound(db_session: AsyncSession) -> None:
     signals = [FactorSignal(f"big_factor_{i}", triggered=True) for i in range(6)]
     result = await engine.assess(signals, policy_version="1.0-clamp")
 
-    # 6 × 50 = 300, clamped to 200
+    # 6 x 50 = 300, clamped to 200
     assert result.risk_score == 200.0
     assert result.risk_level == "critical"
 

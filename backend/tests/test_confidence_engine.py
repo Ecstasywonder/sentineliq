@@ -94,7 +94,7 @@ class TestConfidenceEngineBaseline:
 
 class TestSourceUnavailableReduction:
     def test_one_unavailable_required_source(self):
-        """One missing required source → −0.20."""
+        """One missing required source -> -0.20."""
         engine = ConfidenceEngine()
         sources = [SourceStatus("access_control", available=False, required=True)]
         result = engine.assess(sources)
@@ -106,7 +106,7 @@ class TestSourceUnavailableReduction:
         assert result.reductions[0].source_id == "access_control"
 
     def test_two_unavailable_required_sources(self):
-        """Two missing required sources → −0.40 → 0.60 (medium)."""
+        """Two missing required sources -> -0.40 -> 0.60 (medium)."""
         engine = ConfidenceEngine()
         sources = _all_unavailable(["access_control", "schedule"])
         result = engine.assess(sources)
@@ -125,7 +125,7 @@ class TestSourceUnavailableReduction:
         assert result.reductions == []
 
     def test_five_unavailable_required_clamps_to_zero(self):
-        """5 × 0.20 = 1.0 reduction → score clamped to 0.0, not negative."""
+        """5 x 0.20 = 1.0 reduction -> score clamped to 0.0, not negative."""
         engine = ConfidenceEngine()
         sources = _all_unavailable(["a", "b", "c", "d", "e"])
         result = engine.assess(sources)
@@ -136,7 +136,7 @@ class TestSourceUnavailableReduction:
 
 class TestStaleSourceReduction:
     def test_one_stale_source(self):
-        """One stale available source → −0.10."""
+        """One stale available source -> -0.10."""
         engine = ConfidenceEngine()
         sources = [SourceStatus("access_control", available=True, stale=True)]
         result = engine.assess(sources)
@@ -181,7 +181,7 @@ class TestIncompleteMetadataReduction:
 
 class TestToolRetrievalErrorReduction:
     def test_one_tool_error(self):
-        """Tool retrieval error → −0.10 per erroring source."""
+        """Tool retrieval error -> -0.10 per erroring source."""
         engine = ConfidenceEngine()
         result = engine.assess(sources=[], tool_retrieval_errors=["access_control"])
 
@@ -228,7 +228,7 @@ class TestLlmUnavailableReduction:
 
 class TestStackedReductions:
     def test_unavailable_plus_llm_unavailable(self):
-        """One missing source (−0.20) + LLM unavailable (−0.20) = 0.60 (medium)."""
+        """One missing source (-0.20) + LLM unavailable (-0.20) = 0.60 (medium)."""
         engine = ConfidenceEngine()
         sources = [SourceStatus("access_control", available=False, required=True)]
         result = engine.assess(sources, llm_unavailable=True)

@@ -64,7 +64,7 @@ This register records all assumptions made during the design and implementation 
 |----|-----------|------|----------------|-------|--------|
 | A-17 | No live CCTV integration is required for MVP | 0–25 | Simulator must be expanded | Project Owner | Confirmed |
 | A-18 | No production biometrics at any gate | All | Fundamental architecture change; out of scope | Architect | Confirmed |
-| A-19 | Solution Design PDF is consistent with the Master Build Prompt | 1 | BRD may need reconciliation | Project Owner | Open |
+| A-19 | Solution Design PDF is consistent with the Master Build Prompt | 1 | BRD may need reconciliation | Project Owner | Confirmed — PDF reviewed 2026-11-03; fully consistent. Persona (Musa/Maya) added to BRD. |
 | A-20 | Single EC2 instance is sufficient for MVP (Gates 0–25) | 0–25 | May need instance resize or multi-instance for load testing | Architect | Open |
 | A-21 | The primary operator UI is a web dashboard (not mobile-first) | 16 | Responsive design approach changes | Project Owner | Open |
 

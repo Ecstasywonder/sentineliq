@@ -88,6 +88,18 @@ SentinelIQ will make security operators better informed and faster at interpreti
 
 ### 5.1 Primary User — Security Monitoring Officer
 
+**Persona: Musa / Maya** *(from SentinelIQ Solution Design PDF)*
+
+Musa/Maya works a shift in a control-room environment, monitors several feeds, and must decide quickly whether an event should be escalated. They understand security procedures but may not have time to search across logs, schedules, and incident history while monitoring live feeds.
+
+**Goals & motivations:** Protect people and assets · Avoid missing events · Report clearly and quickly
+
+**Pain points:** Alert fatigue · Ambiguous events · Slow verification · Poor audit trail
+
+**Must-have experience:** A concise alert with risk level, supporting evidence, recommended next step, and clear human-review controls.
+
+**Success measure:** The user can explain why an alert matters and decide what to do next in less time.
+
 **Context:** Monitors multiple event feeds under time pressure. Needs concise, reliable context to determine whether an event requires action.
 
 **Needs:**

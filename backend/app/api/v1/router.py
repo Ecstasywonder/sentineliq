@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import health as health_router
+from app.api.v1.endpoints import events as events_router
 
 api_v1_router = APIRouter()
 
@@ -13,4 +14,11 @@ api_v1_router.include_router(
     health_router.router,
     prefix="/system",
     tags=["System"],
+)
+
+# Events — ingestion, queue, lifecycle
+api_v1_router.include_router(
+    events_router.router,
+    prefix="/events",
+    tags=["Events"],
 )

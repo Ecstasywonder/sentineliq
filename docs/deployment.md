@@ -142,3 +142,33 @@ DATABASE_URL_SYNC="sqlite:///:memory:" \
 ```
 
 **Expected:** all tests pass, coverage report printed.
+
+## Running Gate 5 Tests — Event Ingestion API
+
+```bash
+cd ~/sentineliq/backend
+source .venv/bin/activate
+
+APP_ENV=development \
+SECRET_KEY=test-secret-key \
+DATABASE_URL="sqlite+aiosqlite:///:memory:" \
+DATABASE_URL_SYNC="sqlite:///:memory:" \
+  pytest tests/test_events_api.py -v
+
+# Full suite
+APP_ENV=development \
+SECRET_KEY=test-secret-key \
+DATABASE_URL="sqlite+aiosqlite:///:memory:" \
+DATABASE_URL_SYNC="sqlite:///:memory:" \
+  pytest tests/ -v
+```
+
+## Gate 5 API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/events` | Ingest a security event (201 new, 200 duplicate) |
+| `GET` | `/api/v1/events` | Paginated event queue (`?status=&risk_level=&page=&page_size=`) |
+| `GET` | `/api/v1/events/{id}` | Retrieve single event by ID |
+| `PATCH` | `/api/v1/events/{id}/status` | Advance event lifecycle status |
+

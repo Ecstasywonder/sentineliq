@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,21 +27,19 @@ class RiskAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     risk_policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
     risk_score: Mapped[float] = mapped_column(Float, nullable=False)
     risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
-    risk_factors_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    risk_factors_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Confidence stored alongside risk but logically independent
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     confidence_reductions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    assessed_at: Mapped[str] = mapped_column(String(32), nullable=False)  # ISO 8601 UTC
+    assessed_at: Mapped[str] = mapped_column(String(32), nullable=False)
     agent_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    event: Mapped[SecurityEvent] = relationship(  # noqa: F821
+    event: Mapped[SecurityEvent] = relationship(  # type: ignore[name-defined]
         "SecurityEvent", back_populates="risk_assessment"
     )
-
-    from app.models.event import SecurityEvent  # noqa: F401, PLC0415
 
 
 class ConfidenceAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -59,7 +59,11 @@ class ConfidenceAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     confidence_level: Mapped[str] = mapped_column(String(16), nullable=False)
-    reductions_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    reductions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     sources_available: Mapped[int] = mapped_column(default=0, nullable=False)
     sources_required: Mapped[int] = mapped_column(default=0, nullable=False)
     assessed_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+if TYPE_CHECKING:
+    from app.models.event import SecurityEvent

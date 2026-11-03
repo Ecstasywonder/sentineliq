@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -46,14 +48,16 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
         index=True,
     )
     action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    actor: Mapped[str] = mapped_column(String(128), nullable=False)  # user_id or "system"
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
     actor_role: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    occurred_at: Mapped[str] = mapped_column(String(32), nullable=False, index=True)  # ISO 8601 UTC
+    occurred_at: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     redacted: Mapped[bool] = mapped_column(default=False, nullable=False)
 
-    event: Mapped[SecurityEvent | None] = relationship(  # noqa: F821
+    event: Mapped[SecurityEvent | None] = relationship(  # type: ignore[name-defined]
         "SecurityEvent", back_populates="audit_events"
     )
 
-    from app.models.event import SecurityEvent  # noqa: F401, PLC0415
+
+if TYPE_CHECKING:
+    from app.models.event import SecurityEvent

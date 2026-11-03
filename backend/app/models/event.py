@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, Index, String, Text
+from sqlalchemy import Float, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -41,9 +41,7 @@ class SecurityEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     # Source identifiers
-    provider_event_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True
-    )
+    provider_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     source_adapter: Mapped[str] = mapped_column(String(64), default="simulator", nullable=False)
 
     # Event classification
@@ -51,9 +49,7 @@ class SecurityEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     event_timestamp: Mapped[str] = mapped_column(String(32), nullable=False)  # ISO 8601 UTC
 
     # Location
-    location_id: Mapped[str] = mapped_column(
-        String(128), nullable=False, index=True
-    )
+    location_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     facility_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     camera_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -67,9 +63,7 @@ class SecurityEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     normalised_data: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Lifecycle status
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="received", index=True
-    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="received", index=True)
 
     # Denormalised risk/confidence for fast queue queries
     risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
@@ -80,34 +74,38 @@ class SecurityEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Assessment linkage
     agent_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    # Relationships
-    evidence: Mapped[list[EventEvidence]] = relationship(  # noqa: F821
+    # Relationships — use string references to avoid circular imports
+    evidence: Mapped[list[EventEvidence]] = relationship(  # type: ignore[name-defined]
         "EventEvidence", back_populates="event", cascade="all, delete-orphan"
     )
-    risk_assessment: Mapped[RiskAssessment | None] = relationship(  # noqa: F821
+    risk_assessment: Mapped[RiskAssessment | None] = relationship(  # type: ignore[name-defined]
         "RiskAssessment", back_populates="event", uselist=False
     )
-    recommendation: Mapped[Recommendation | None] = relationship(  # noqa: F821
+    recommendation: Mapped[Recommendation | None] = relationship(  # type: ignore[name-defined]
         "Recommendation", back_populates="event", uselist=False
     )
-    operator_decisions: Mapped[list[OperatorDecision]] = relationship(  # noqa: F821
+    operator_decisions: Mapped[list[OperatorDecision]] = relationship(  # type: ignore[name-defined]
         "OperatorDecision", back_populates="event"
     )
-    escalations: Mapped[list[Escalation]] = relationship(  # noqa: F821
+    escalations: Mapped[list[Escalation]] = relationship(  # type: ignore[name-defined]
         "Escalation", back_populates="event"
     )
-    audit_events: Mapped[list[AuditEvent]] = relationship(  # noqa: F821
+    audit_events: Mapped[list[AuditEvent]] = relationship(  # type: ignore[name-defined]
         "AuditEvent", back_populates="event"
     )
-    feedback: Mapped[list[Feedback]] = relationship(  # noqa: F821
+    feedback: Mapped[list[Feedback]] = relationship(  # type: ignore[name-defined]
         "Feedback", back_populates="event"
     )
 
-    # Forward-reference type aliases resolved at runtime
-    from app.models.evidence import EventEvidence  # noqa: F401, PLC0415
-    from app.models.assessment import RiskAssessment  # noqa: F401, PLC0415
-    from app.models.recommendation import Recommendation  # noqa: F401, PLC0415
-    from app.models.decision import OperatorDecision  # noqa: F401, PLC0415
-    from app.models.escalation import Escalation  # noqa: F401, PLC0415
-    from app.models.audit import AuditEvent  # noqa: F401, PLC0415
-    from app.models.feedback import Feedback  # noqa: F401, PLC0415
+
+# TYPE_CHECKING-only imports to satisfy type checkers without causing circular imports
+from typing import TYPE_CHECKING  # noqa: E402
+
+if TYPE_CHECKING:
+    from app.models.evidence import EventEvidence
+    from app.models.assessment import RiskAssessment
+    from app.models.recommendation import Recommendation
+    from app.models.decision import OperatorDecision
+    from app.models.escalation import Escalation
+    from app.models.audit import AuditEvent
+    from app.models.feedback import Feedback

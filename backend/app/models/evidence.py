@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,11 +27,13 @@ class EventEvidence(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     retrieved_at: Mapped[str] = mapped_column(String(32), nullable=False)  # ISO 8601 UTC
     source_timestamp: Mapped[str | None] = mapped_column(String(32), nullable=True)
     relevance: Mapped[str | None] = mapped_column(Text, nullable=True)
-    content_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # structured payload
+    content_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    event: Mapped[SecurityEvent] = relationship(  # noqa: F821
+    event: Mapped[SecurityEvent] = relationship(  # type: ignore[name-defined]
         "SecurityEvent", back_populates="evidence"
     )
 
-    from app.models.event import SecurityEvent  # noqa: F401, PLC0415
+
+if TYPE_CHECKING:
+    from app.models.event import SecurityEvent

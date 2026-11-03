@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,7 +23,7 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     recommended_action: Mapped[str] = mapped_column(Text, nullable=False)
-    why_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of {text, evidence_ids}
+    why_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     missing_evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     limitations_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     requires_human_review: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -31,8 +33,10 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     agent_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     generated_at: Mapped[str] = mapped_column(String(32), nullable=False)
 
-    event: Mapped[SecurityEvent] = relationship(  # noqa: F821
+    event: Mapped[SecurityEvent] = relationship(  # type: ignore[name-defined]
         "SecurityEvent", back_populates="recommendation"
     )
 
-    from app.models.event import SecurityEvent  # noqa: F401, PLC0415
+
+if TYPE_CHECKING:
+    from app.models.event import SecurityEvent

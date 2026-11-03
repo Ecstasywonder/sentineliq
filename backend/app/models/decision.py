@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,7 +27,7 @@ class OperatorDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(36), ForeignKey("security_events.id", ondelete="CASCADE"), nullable=False, index=True
     )
     recommendation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    decided_by: Mapped[str] = mapped_column(String(36), nullable=False, index=True)  # user_id
+    decided_by: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     decided_by_role: Mapped[str] = mapped_column(String(64), nullable=False)
     decision: Mapped[str] = mapped_column(String(32), nullable=False)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -33,10 +35,12 @@ class OperatorDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     prior_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     risk_at_decision: Mapped[str | None] = mapped_column(String(16), nullable=True)
     confidence_at_decision: Mapped[float | None] = mapped_column(nullable=True)
-    decided_at: Mapped[str] = mapped_column(String(32), nullable=False)  # ISO 8601 UTC
+    decided_at: Mapped[str] = mapped_column(String(32), nullable=False)
 
-    event: Mapped[SecurityEvent] = relationship(  # noqa: F821
+    event: Mapped[SecurityEvent] = relationship(  # type: ignore[name-defined]
         "SecurityEvent", back_populates="operator_decisions"
     )
 
-    from app.models.event import SecurityEvent  # noqa: F401, PLC0415
+
+if TYPE_CHECKING:
+    from app.models.event import SecurityEvent

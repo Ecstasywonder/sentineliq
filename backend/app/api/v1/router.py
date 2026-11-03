@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.v1.endpoints import audit as audit_router
 from app.api.v1.endpoints import auth as auth_router
 from app.api.v1.endpoints import decisions as decisions_router
 from app.api.v1.endpoints import escalations as escalations_router
@@ -48,6 +49,14 @@ api_v1_router.include_router(
     escalations_router.router,
     prefix="/events",
     tags=["Escalations"],
+)
+
+# Audit Trail — read-only audit log (Gate 12)
+# Routes: /api/v1/events/{id}/audit  and  /api/v1/audit
+api_v1_router.include_router(
+    audit_router.router,
+    prefix="",
+    tags=["Audit"],
 )
 
 # Context tools — evidence retrieval (Gate 7, ADR-005 read-only adapters)

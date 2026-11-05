@@ -341,20 +341,49 @@ class TestParseAndValidate:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — TriageService.run() with mocked Orchestrate
+# Unit tests — TriageService.run() three-path routing (ADR-008)
 # ---------------------------------------------------------------------------
+
+
+def _settings_neither():
+    """Mock settings: neither Orchestrate nor watsonx.ai configured → Path 0."""
+    m = MagicMock()
+    m.orchestrate_active = False
+    m.watsonx_active = False
+    m.agent_invoke_timeout = 30.0
+    return m
+
+
+def _settings_path_a():
+    """Mock settings: watsonx.ai active, no Orchestrate → Path A."""
+    m = MagicMock()
+    m.orchestrate_active = False
+    m.watsonx_active = True
+    m.agent_invoke_timeout = 30.0
+    m.watsonx_model_id = "ibm/granite-4-h-small"
+    m.effective_watsonx_base_url = "https://us-south.ml.cloud.ibm.com"
+    m.effective_watsonx_space_id = "test-space"
+    m.effective_watsonx_api_key = "test-key"
+    return m
+
+
+def _settings_path_b():
+    """Mock settings: Orchestrate active → Path B."""
+    m = MagicMock()
+    m.orchestrate_active = True
+    m.watsonx_active = False
+    m.agent_invoke_timeout = 30.0
+    m.orchestrate_url = "https://tenant.ibm-watson-orchestrate.com"
+    m.orchestrate_triage_agent_id = "sentinel_triage_agent"
+    m.effective_watsonx_api_key = "test-key"
+    return m
 
 
 @pytest.mark.asyncio
 class TestTriageServiceRun:
-    async def test_run_falls_back_when_not_configured(self):
-        """No Orchestrate credentials → deterministic_fallback, no HTTP call."""
-        with patch("app.services.triage_service.get_settings") as mock_settings:
-            mock_settings.return_value = MagicMock(
-                orchestrate_base_url="",
-                orchestrate_api_key="",
-                orchestrate_space_id="",
-            )
+    async def test_run_path0_when_nothing_configured(self):
+        """Neither path configured → deterministic_fallback (Path 0)."""
+        with patch("app.services.triage_service.get_settings", return_value=_settings_neither()):
             svc = TriageService(session=None)
             result = await svc.run(
                 event_id="EVT-001",
@@ -367,8 +396,8 @@ class TestTriageServiceRun:
         assert result.category == "after_hours_presence"
         assert "after_hours" in result.urgency_signals
 
-    async def test_run_uses_orchestrate_when_configured(self):
-        """Valid Orchestrate credentials + valid response → orchestrate source."""
+    async def test_run_path_a_success(self):
+        """watsonx.ai configured + valid response → watsonx_ai source (Path A)."""
         agent_output = json.dumps({
             "event_id": "EVT-001",
             "category": "after_hours_presence",
@@ -376,115 +405,150 @@ class TestTriageServiceRun:
             "required_context": ["access_control", "schedule", "location_policy", "incident_history"],
             "triage_rationale": "Event in restricted zone after hours.",
         })
+        mock_iam = MagicMock()
+        mock_iam.raise_for_status = MagicMock()
+        mock_iam.json.return_value = {"access_token": "tok"}
 
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": agent_output}}]
-        }
+        mock_chat = MagicMock()
+        mock_chat.raise_for_status = MagicMock()
+        mock_chat.json.return_value = {"choices": [{"message": {"content": agent_output}}]}
 
-        with patch("app.services.triage_service.get_settings") as mock_settings, \
-             patch("httpx.AsyncClient") as mock_client_cls:
-            mock_settings.return_value = MagicMock(
-                orchestrate_base_url="https://orchestrate.example.com",
-                orchestrate_api_key="test-key",
-                orchestrate_space_id="",
-            )
+        with patch("app.services.triage_service.get_settings", return_value=_settings_path_a()), \
+             patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.post = AsyncMock(side_effect=[mock_iam, mock_chat])
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+            mock_cls.return_value = mock_client
 
             svc = TriageService(session=None)
-            result = await svc.run(
-                event_id="EVT-001",
-                event_metadata=_make_event_metadata(),
-            )
+            result = await svc.run(event_id="EVT-001", event_metadata=_make_event_metadata())
+
+        assert result.source == "watsonx_ai"
+        assert result.category == "after_hours_presence"
+
+    async def test_run_path_b_success(self):
+        """Orchestrate configured + valid response → orchestrate source (Path B)."""
+        agent_output = json.dumps({
+            "event_id": "EVT-001",
+            "category": "alarm_event",
+            "urgency_signals": ["forced_entry"],
+            "required_context": ["access_control", "schedule", "location_policy", "incident_history"],
+            "triage_rationale": "Door forced.",
+        })
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"output": agent_output}
+
+        with patch("app.services.triage_service.get_settings", return_value=_settings_path_b()), \
+             patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            svc = TriageService(session=None)
+            result = await svc.run(event_id="EVT-001", event_metadata=_make_event_metadata())
 
         assert result.source == "orchestrate"
-        assert result.category == "after_hours_presence"
-        assert "after_hours" in result.urgency_signals
+        assert result.category == "alarm_event"
 
-    async def test_run_falls_back_on_http_error(self):
-        """HTTP error from Orchestrate → deterministic_fallback, no exception raised."""
+    async def test_run_path_a_falls_back_on_http_error(self):
+        """HTTP error from watsonx.ai → deterministic_fallback."""
         import httpx
 
-        with patch("app.services.triage_service.get_settings") as mock_settings, \
-             patch("httpx.AsyncClient") as mock_client_cls:
-            mock_settings.return_value = MagicMock(
-                orchestrate_base_url="https://orchestrate.example.com",
-                orchestrate_api_key="test-key",
-                orchestrate_space_id="",
-            )
+        with patch("app.services.triage_service.get_settings", return_value=_settings_path_a()), \
+             patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(
-                side_effect=httpx.ConnectError("Connection refused")
-            )
+            mock_client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+            mock_cls.return_value = mock_client
 
             svc = TriageService(session=None)
-            result = await svc.run(
-                event_id="EVT-001",
-                event_metadata=_make_event_metadata(),
-            )
+            result = await svc.run(event_id="EVT-001", event_metadata=_make_event_metadata())
 
         assert result.source == "deterministic_fallback"
 
-    async def test_run_falls_back_on_invalid_json(self):
+    async def test_run_path_a_falls_back_on_invalid_json(self):
         """Agent returns non-JSON → deterministic_fallback."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Sorry I cannot help with that."}}]
+        mock_iam = MagicMock()
+        mock_iam.raise_for_status = MagicMock()
+        mock_iam.json.return_value = {"access_token": "tok"}
+
+        mock_chat = MagicMock()
+        mock_chat.raise_for_status = MagicMock()
+        mock_chat.json.return_value = {
+            "choices": [{"message": {"content": "Sorry I cannot help."}}]
         }
 
-        with patch("app.services.triage_service.get_settings") as mock_settings, \
-             patch("httpx.AsyncClient") as mock_client_cls:
-            mock_settings.return_value = MagicMock(
-                orchestrate_base_url="https://orchestrate.example.com",
-                orchestrate_api_key="test-key",
-                orchestrate_space_id="",
-            )
+        with patch("app.services.triage_service.get_settings", return_value=_settings_path_a()), \
+             patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.post = AsyncMock(side_effect=[mock_iam, mock_chat])
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+            mock_cls.return_value = mock_client
 
             svc = TriageService(session=None)
-            result = await svc.run(
-                event_id="EVT-001",
-                event_metadata=_make_event_metadata(),
-            )
+            result = await svc.run(event_id="EVT-001", event_metadata=_make_event_metadata())
 
         assert result.source == "deterministic_fallback"
 
-    async def test_run_empty_choices_falls_back(self):
-        """Empty Orchestrate choices array → deterministic_fallback."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"choices": []}
+    async def test_run_path_b_falls_through_to_path_a(self):
+        """Path B fails → Path A used → watsonx_ai source."""
+        import httpx
 
-        with patch("app.services.triage_service.get_settings") as mock_settings, \
-             patch("httpx.AsyncClient") as mock_client_cls:
-            mock_settings.return_value = MagicMock(
-                orchestrate_base_url="https://orchestrate.example.com",
-                orchestrate_api_key="test-key",
-                orchestrate_space_id="",
-            )
+        agent_output = json.dumps({
+            "event_id": "EVT-001",
+            "category": "unclassified",
+            "urgency_signals": [],
+            "required_context": ["access_control"],
+            "triage_rationale": "test",
+        })
+        mock_iam = MagicMock()
+        mock_iam.raise_for_status = MagicMock()
+        mock_iam.json.return_value = {"access_token": "tok"}
+
+        mock_chat = MagicMock()
+        mock_chat.raise_for_status = MagicMock()
+        mock_chat.json.return_value = {"choices": [{"message": {"content": agent_output}}]}
+
+        settings = MagicMock()
+        settings.orchestrate_active = True
+        settings.watsonx_active = True
+        settings.agent_invoke_timeout = 30.0
+        settings.orchestrate_url = "https://tenant.ibm-watson-orchestrate.com"
+        settings.orchestrate_triage_agent_id = "sentinel_triage_agent"
+        settings.effective_watsonx_api_key = "test-key"
+        settings.watsonx_model_id = "ibm/granite-4-h-small"
+        settings.effective_watsonx_base_url = "https://us-south.ml.cloud.ibm.com"
+        settings.effective_watsonx_space_id = "test-space"
+
+        call_count = {"n": 0}
+
+        async def mock_post(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise httpx.ConnectError("Orchestrate down")
+            # IAM and chat calls for Path A
+            if call_count["n"] == 2:
+                return mock_iam
+            return mock_chat
+
+        with patch("app.services.triage_service.get_settings", return_value=settings), \
+             patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.post = AsyncMock(side_effect=mock_post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+            mock_cls.return_value = mock_client
 
             svc = TriageService(session=None)
-            result = await svc.run(event_id="EVT-001", event_metadata={})
+            result = await svc.run(event_id="EVT-001", event_metadata=_make_event_metadata())
 
-        assert result.source == "deterministic_fallback"
+        assert result.source == "watsonx_ai"
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +590,7 @@ async def test_assess_response_contains_triage_field(client):
     assert "required_context" in triage
     assert "triage_rationale" in triage
     assert "source" in triage
-    assert triage["source"] in ("orchestrate", "deterministic_fallback", "skipped")
+    assert triage["source"] in ("orchestrate", "watsonx_ai", "deterministic_fallback", "skipped", "failed_fallback")
 
     # Baseline context must always be present
     for ctx in ("access_control", "schedule", "location_policy", "incident_history"):

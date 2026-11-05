@@ -36,10 +36,14 @@ from app.models.agent_run import AgentRun, ToolCall
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Orchestrate endpoint constants
+# watsonx.ai endpoint constants
 # ---------------------------------------------------------------------------
 
-_AGENT_INVOKE_PATH = "/v1/chat/completions"
+# The watsonx.ai Chat API is used directly (no Orchestrate SaaS required).
+# Verified working: POST /ml/v1/text/chat?version=2024-09-16 with space_id
+_CHAT_PATH = "/ml/v1/text/chat"
+_CHAT_VERSION = "2024-09-16"
+_DEFAULT_MODEL = "ibm/granite-4-h-small"
 
 # Categories / signals / context sources — must stay in sync with agent.yaml
 _ALL_CATEGORIES = {
@@ -204,7 +208,7 @@ class TriageService:
             return result
 
     # ------------------------------------------------------------------
-    # Orchestrate HTTP call
+    # watsonx.ai Chat API call
     # ------------------------------------------------------------------
 
     async def _invoke_orchestrate(
@@ -214,65 +218,101 @@ class TriageService:
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
         """
-        Call the Orchestrate agent API.
+        Call the watsonx.ai Chat API (POST /ml/v1/text/chat).
 
         Returns:
             (raw_text_output, tool_call_records)
 
-        The Orchestrate Chat Completions endpoint is used with the agent
-        referenced by its agent name.  The event metadata is provided as
-        a user message in JSON.
+        Authentication: IBM Cloud IAM bearer token obtained from the API key.
+        Space: orchestrate_space_id must point to a space with a WML instance.
+        Model: ibm/granite-4-h-small (verified available in the Orchestrate
+               Developer Edition space).
+
+        The agent instructions are provided as a system message; the event
+        metadata JSON is provided as the user message.
         """
         settings = self._settings
         base_url = settings.orchestrate_base_url.rstrip("/")
+
+        # Obtain IAM bearer token from the API key
+        iam_token = await self._get_iam_token(settings.orchestrate_api_key, timeout)
+
         headers = {
-            "Authorization": f"Bearer {settings.orchestrate_api_key}",
+            "Authorization": f"Bearer {iam_token}",
             "Content-Type": "application/json",
         }
+
+        # Build the system instructions (mirrors agent.yaml instructions)
+        system_prompt = (
+            "You are the SentinelIQ Triage Agent.\n"
+            "Classify the security event and return ONLY valid JSON with these exact keys:\n"
+            "  event_id, category, urgency_signals, required_context, triage_rationale\n"
+            "category MUST be one of: after_hours_presence, restricted_area_access, "
+            "delivery_event, authorized_access, alarm_event, vehicle_event, unclassified\n"
+            "urgency_signals MUST only use: after_hours, restricted_zone, forced_entry, "
+            "no_camera_coverage, low_detector_confidence, missing_event_metadata, repeated_event\n"
+            "required_context MUST only use: access_control, schedule, location_policy, "
+            "incident_history, work_orders, delivery_context, visitor_context, integration_health\n"
+            "Return JSON only — no prose, no markdown, no explanation."
+        )
+
         payload: dict[str, Any] = {
-            "agent_id": "sentinel_triage_agent",
+            "model_id": _DEFAULT_MODEL,
+            "space_id": settings.orchestrate_space_id,
             "messages": [
-                {
-                    "role": "user",
-                    "content": json.dumps(event_metadata, default=str),
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(event_metadata, default=str)},
             ],
-            "stream": False,
+            "parameters": {
+                "max_new_tokens": 300,
+                "decoding_method": "greedy",
+            },
         }
-        if settings.orchestrate_space_id:
-            payload["space_id"] = settings.orchestrate_space_id
 
         tool_call_records: list[dict[str, Any]] = []
+        url = f"{base_url}{_CHAT_PATH}?version={_CHAT_VERSION}"
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             t_tool = time.monotonic()
-            response = await client.post(
-                f"{base_url}{_AGENT_INVOKE_PATH}",
-                headers=headers,
-                json=payload,
-            )
+            response = await client.post(url, headers=headers, json=payload)
             call_ms = (time.monotonic() - t_tool) * 1000
             response.raise_for_status()
 
         data = response.json()
 
-        # Record tool call metadata for observability
         tool_call_records.append({
-            "tool_name": "orchestrate_invoke",
+            "tool_name": "watsonx_chat",
             "status": "success",
             "duration_ms": call_ms,
             "sequence": 0,
         })
 
-        # Extract text content from the response
         choices = data.get("choices") or []
         if not choices:
-            raise ValueError("Orchestrate response contained no choices.")
+            raise ValueError("watsonx.ai response contained no choices.")
         content = (choices[0].get("message") or {}).get("content", "")
         if not content:
-            raise ValueError("Orchestrate response content was empty.")
+            raise ValueError("watsonx.ai response content was empty.")
 
         return content, tool_call_records
+
+    async def _get_iam_token(self, api_key: str, timeout: float) -> str:
+        """Exchange an IBM Cloud API key for a short-lived IAM bearer token."""
+        async with httpx.AsyncClient(timeout=min(timeout, 15.0)) as client:
+            resp = await client.post(
+                "https://iam.cloud.ibm.com/identity/token",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={
+                    "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
+                    "apikey": api_key,
+                },
+            )
+            resp.raise_for_status()
+        token_data = resp.json()
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            raise ValueError("IAM token exchange returned no access_token.")
+        return access_token
 
     # ------------------------------------------------------------------
     # Response validation

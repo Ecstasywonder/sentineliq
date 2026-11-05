@@ -1,7 +1,8 @@
 """
-AssessmentService — Gate 8.
+AssessmentService — Gate 8 / Gate 14.
 
 Orchestrates:
+  0. TriageService.run()          — classify event + identify required context (Gate 14)
   1. EvidenceAggregator.gather()  — collect all 7 evidence sources
   2. _build_signals()             — derive FactorSignals from evidence
   3. RiskEngine.assess()          — deterministic risk score (ADR-003)
@@ -10,8 +11,9 @@ Orchestrates:
   6. Denormalise risk/confidence back onto SecurityEvent
   7. Transition event: normalised → assessing → awaiting_review
 
-The LLM is NOT called here — it is invoked later by the Triage/Explanation
-agents (Gate 14+).  This service is purely deterministic.
+Triage runs BEFORE the deterministic pipeline.  If Orchestrate is unavailable,
+TriageService automatically falls back to deterministic classification.
+The event is NEVER lost due to a triage failure.
 """
 
 from __future__ import annotations
@@ -29,10 +31,12 @@ from app.models.assessment import ConfidenceAssessment, RiskAssessment
 from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
+from app.schemas.triage import TriageResultDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
 from app.services.event_lifecycle import validate_transition
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.risk_engine import FactorSignal, RiskEngine
+from app.services.triage_service import TriageService
 
 logger = structlog.get_logger(__name__)
 
@@ -99,6 +103,26 @@ class AssessmentService:
 
         # ---- 1. Load event ---------------------------------------------------
         event = await self._load_event(event_id)
+
+        # ---- 0. Triage (Gate 14) — classify event, identify required context --
+        triage_svc = TriageService(self._session)
+        triage_result = await triage_svc.run(
+            event_id=event_id,
+            event_metadata={
+                "event_id": event.id,
+                "event_type": event.event_type,
+                "event_timestamp": event.event_timestamp,
+                "location_id": event.location_id,
+                "facility_id": event.facility_id,
+                "camera_id": event.camera_id,
+                "zone": event.zone,
+                "detector_confidence": event.detector_confidence,
+            },
+        )
+
+        # Store agent_run_id on the event for traceability
+        if triage_result.agent_run_id:
+            event.agent_run_id = triage_result.agent_run_id
 
         # ---- 2. Transition: current → assessing ------------------------------
         validate_transition(event.status, "assessing")
@@ -180,9 +204,19 @@ class AssessmentService:
             evidence_errors=list(evidence.errors.keys()),
         )
 
+        triage_detail = TriageResultDetail(
+            category=triage_result.category,
+            urgency_signals=triage_result.urgency_signals,
+            required_context=triage_result.required_context,
+            triage_rationale=triage_result.triage_rationale,
+            source=triage_result.source,
+            agent_run_id=triage_result.agent_run_id,
+        )
+
         return AssessmentResponse(
             event_id=event_id,
             event_status=event.status,
+            triage=triage_detail,
             risk_score=risk_result.risk_score,
             risk_level=risk_result.risk_level,
             risk_policy_version=risk_result.policy_version,

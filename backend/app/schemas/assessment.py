@@ -1,10 +1,12 @@
 """
-Pydantic schemas for the Risk Assessment API — Gate 8.
+Pydantic schemas for the Risk Assessment API — Gate 8 / Triage Gate 14.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+
+from app.schemas.triage import TriageResultDetail
 
 # ---------------------------------------------------------------------------
 # Request
@@ -60,6 +62,9 @@ class AssessmentResponse(BaseModel):
 
     event_id: str
     event_status: str
+
+    # Triage (agent classification — Gate 14)
+    triage: TriageResultDetail | None = None
 
     # Risk (deterministic, ADR-003)
     risk_score: float

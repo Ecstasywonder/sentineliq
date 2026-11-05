@@ -36,8 +36,8 @@ Gates are executed in order. No gate is considered complete until:
 | **11** | Escalation API | ✅ Complete | `docs/gate-11-escalation-api.md` |
 | **12** | Audit Trail API | ✅ Complete | `docs/gate-12-audit-trail-api.md` |
 | **13** | Feedback API | ✅ Complete | `docs/gate-13-feedback-api.md` |
-| **14** | Triage Agent (watsonx Orchestrate) | 🔲 Next | — |
-| **15** | Context Agent (watsonx Orchestrate) | 🔲 Pending | — |
+| **14** | Triage Agent (watsonx Orchestrate) | ✅ Complete | `docs/gate-14-triage-agent.md` |
+| **15** | Context Agent (watsonx Orchestrate) | 🔲 Next | — |
 | **16** | Explanation Agent (watsonx Orchestrate) | 🔲 Pending | — |
 | **17** | Sentinel Coordinator (watsonx Orchestrate) | 🔲 Pending | — |
 | **18** | Agent Tool Schemas (OpenAPI → Orchestrate) | 🔲 Pending | — |
@@ -196,15 +196,30 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 14 — Triage Agent / watsonx Orchestrate (Next)
+## Gate 14 — Triage Agent / watsonx Orchestrate ✅
+
+**Deliverables:**
+- `agents/triage/agent.yaml` — Orchestrate agent definition (model, tools, instructions, output schema)
+- `agents/triage/output_schema.py` — Pydantic TriageResult schema
+- `agents/triage/tools/get_event_detail.yaml` — OpenAPI 3.1 tool schema (read-only)
+- `backend/app/services/triage_service.py` — TriageService: Orchestrate call + AgentRun persistence + deterministic fallback
+- `backend/app/schemas/triage.py` — TriageResult + TriageResultDetail
+- `backend/app/schemas/assessment.py` — `triage` field added to AssessmentResponse
+- `backend/app/services/assessment_service.py` — Step 0: TriageService wired in
+- `backend/tests/test_triage_agent.py` — 46 tests
+- `docs/adr/ADR-007-triage-agent-integration.md`
+- 46 tests added; all existing tests unaffected
+
+---
+
+## Gate 15 — Context Agent / watsonx Orchestrate (Next)
 
 **Scope:**
-- Requires watsonx Orchestrate tenant URL + API key in `backend/.env`
-- Define `triage_agent` in `agents/triage/`
-- Tool schemas for assessment endpoints
-- Integration test: Orchestrate invocation → backend response
-
-> **Action required before Gate 14:** Provide `ORCHESTRATE_URL` and `ORCHESTRATE_API_KEY`
+- Context Agent coordinates evidence retrieval using required_context from Triage Agent
+- Tools: get_access_events, get_schedule_context, get_location_policy, search_incident_history, get_active_work_orders, get_delivery_context, get_integration_health
+- Structured evidence package output
+- Missing source handling + conflict detection
+- ContextService wired into AssessmentService pipeline
 
 ---
 
@@ -235,3 +250,4 @@ Gates are executed in order. No gate is considered complete until:
 | 9 | 30 (retrieval + factors + risk policies) | ~238 | TBC |
 | 10 | 32 (decision API — all 6 types, audit trail, errors) | ~270 | TBC |
 | 11 | 34 (escalation lifecycle, auto-create, audit) | ~304 | 93% |
+| 14 | 46 (triage service, parse+validate, HTTP mock, integration) | ~380 | TBC |

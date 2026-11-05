@@ -1,0 +1,373 @@
+"""
+Auth & RBAC tests -- Gate 6.
+
+Tests cover:
+- Password hashing and verification
+- JWT access/refresh token issuance and decoding
+- Token type enforcement (access token rejected as refresh and vice versa)
+- Expired token rejection
+- POST /api/v1/auth/token: happy path, wrong password, unknown email, disabled account
+- POST /api/v1/auth/refresh: valid refresh, invalid token
+- GET /api/v1/auth/me: returns caller identity
+- RBAC permission model: role -> permission mappings
+- require_permission guard: 403 for insufficient role
+- Events endpoints: 401 without auth, 403 with insufficient role
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+from jose import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.db.session import get_db
+from app.main import app
+from app.models.user import Role, User, UserRole
+from app.security.dependencies import AuthenticatedUser, get_current_user
+from app.security.passwords import hash_password, verify_password
+from app.security.rbac import has_permission, permissions_for_roles
+from app.security.tokens import (
+    TokenError,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+)
+
+
+def _id() -> str:
+    return str(uuid.uuid4())
+
+
+# ===========================================================================
+# Password utilities (pure -- no DB)
+# ===========================================================================
+
+
+class TestPasswords:
+    def test_hash_is_not_plaintext(self):
+        h = hash_password("secret")
+        assert h != "secret"
+        assert h.startswith("$2b$")
+
+    def test_verify_correct_password(self):
+        h = hash_password("correct-horse")
+        assert verify_password("correct-horse", h) is True
+
+    def test_verify_wrong_password(self):
+        h = hash_password("correct-horse")
+        assert verify_password("wrong-horse", h) is False
+
+    def test_two_hashes_differ(self):
+        """bcrypt uses random salt per hash."""
+        assert hash_password("same") != hash_password("same")
+
+
+# ===========================================================================
+# JWT tokens (pure -- no DB)
+# ===========================================================================
+
+
+class TestTokens:
+    def test_access_token_decodes(self):
+        payload = decode_access_token(create_access_token("user-1", ["officer"]))
+        assert payload["sub"] == "user-1"
+        assert "officer" in payload["roles"]
+        assert payload["type"] == "access"
+
+    def test_refresh_token_decodes(self):
+        user_id = decode_refresh_token(create_refresh_token("user-2"))
+        assert user_id == "user-2"
+
+    def test_access_token_rejected_as_refresh(self):
+        token = create_access_token("u", ["officer"])
+        with pytest.raises(TokenError, match="not a refresh token"):
+            decode_refresh_token(token)
+
+    def test_refresh_token_rejected_as_access(self):
+        token = create_refresh_token("u")
+        with pytest.raises(TokenError, match="not an access token"):
+            decode_access_token(token)
+
+    def test_tampered_token_raises(self):
+        token = create_access_token("u", [])
+        with pytest.raises(TokenError):
+            decode_access_token(token + "x")
+
+    def test_expired_token_raises(self):
+        s = get_settings()
+        payload = {
+            "sub": "u",
+            "roles": [],
+            "type": "access",
+            "exp": datetime.now(UTC) - timedelta(seconds=1),
+        }
+        expired = jwt.encode(payload, s.secret_key, algorithm=s.algorithm)
+        with pytest.raises(TokenError):
+            decode_access_token(expired)
+
+    def test_access_token_contains_roles(self):
+        roles = ["officer", "supervisor"]
+        token = create_access_token("u", roles)
+        payload = decode_access_token(token)
+        assert set(payload["roles"]) == set(roles)
+
+    def test_refresh_token_has_no_roles(self):
+        token = create_refresh_token("u")
+        s = get_settings()
+        payload = jwt.decode(token, s.secret_key, algorithms=[s.algorithm])
+        assert "roles" not in payload
+
+
+# ===========================================================================
+# RBAC permission model (pure -- no DB)
+# ===========================================================================
+
+
+class TestRbac:
+    def test_officer_can_read_events(self):
+        assert has_permission(["officer"], "events:read")
+
+    def test_officer_can_decide(self):
+        assert has_permission(["officer"], "events:decide")
+
+    def test_officer_cannot_override(self):
+        assert not has_permission(["officer"], "events:override")
+
+    def test_officer_cannot_admin_users(self):
+        assert not has_permission(["officer"], "admin:users")
+
+    def test_supervisor_can_override(self):
+        assert has_permission(["supervisor"], "events:override")
+
+    def test_platform_admin_has_all(self):
+        perms = permissions_for_roles(["platform_admin"])
+        for p in ["events:read", "events:ingest", "events:decide",
+                  "events:override", "audit:read", "admin:users",
+                  "admin:policy", "admin:agents"]:
+            assert p in perms, f"platform_admin missing {p}"
+
+    def test_audit_reviewer_read_only(self):
+        perms = permissions_for_roles(["audit_reviewer"])
+        assert "events:read" in perms
+        assert "audit:read" in perms
+        assert "events:decide" not in perms
+        assert "events:ingest" not in perms
+
+    def test_multiple_roles_union(self):
+        """User with officer + audit_reviewer gets union of both."""
+        perms = permissions_for_roles(["officer", "audit_reviewer"])
+        assert "events:read" in perms
+        assert "audit:read" in perms
+        assert "events:decide" in perms
+
+    def test_unknown_role_grants_nothing(self):
+        assert permissions_for_roles(["completely_unknown"]) == frozenset()
+
+    def test_empty_roles_grants_nothing(self):
+        assert not has_permission([], "events:read")
+
+
+# ===========================================================================
+# Auth endpoint tests (HTTP -- uses client fixture with stub auth bypassed)
+# ===========================================================================
+
+
+async def _seed_user(
+    session: AsyncSession,
+    email: str,
+    password: str,
+    role_name: str = "officer",
+    is_active: bool = True,
+) -> User:
+    """Create a User + Role + UserRole in the test DB."""
+    role_id = _id()
+    role = Role(id=role_id, name=f"{role_name}_{_id()[:6]}", description=role_name)
+    session.add(role)
+    await session.flush()
+
+    user = User(
+        id=_id(),
+        email=email,
+        full_name="Test Person",
+        hashed_password=hash_password(password),
+        is_active=is_active,
+        is_verified=True,
+    )
+    session.add(user)
+    await session.flush()
+
+    session.add(UserRole(id=_id(), user_id=user.id, role_id=role.id))
+    await session.flush()
+    return user
+
+
+def _auth_client(db_session: AsyncSession):
+    """
+    Context manager: a raw AsyncClient with only the DB overridden.
+    No stub auth — used to test real auth routes (login, refresh).
+    """
+
+    async def _override_db() -> AsyncGenerator:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+@pytest.mark.asyncio
+async def test_login_happy_path(db_session: AsyncSession) -> None:
+    """Correct credentials return access + refresh tokens."""
+    email = f"auth_happy_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "goodpassword")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        resp = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "goodpassword"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "access_token" in body
+    assert "refresh_token" in body
+    assert body["token_type"] == "bearer"
+    assert body["expires_in"] > 0
+
+
+@pytest.mark.asyncio
+async def test_login_wrong_password(db_session: AsyncSession) -> None:
+    """Wrong password returns 401."""
+    email = f"auth_wrong_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "rightpass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        resp = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "wrongpass"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401
+    assert resp.json()["detail"]["code"] == "INVALID_CREDENTIALS"
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_email(db_session: AsyncSession) -> None:
+    """Unknown email returns 401 (not 404 -- prevents user enumeration)."""
+    async with _auth_client(db_session) as ac:
+        resp = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": "nobody@nowhere.com", "password": "pass"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_disabled_account(db_session: AsyncSession) -> None:
+    """Disabled account returns 403."""
+    email = f"auth_disabled_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass", is_active=False)
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        resp = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "ACCOUNT_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_issues_new_access(db_session: AsyncSession) -> None:
+    """A valid refresh token returns a new access token."""
+    email = f"auth_refresh_{_id()[:8]}@test.com"
+    user = await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    refresh = create_refresh_token(user.id)
+    async with _auth_client(db_session) as ac:
+        resp = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_refresh_invalid_token(db_session: AsyncSession) -> None:
+    """Garbage refresh token returns 401."""
+    async with _auth_client(db_session) as ac:
+        resp = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": "not.a.token"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_me_endpoint(client: AsyncClient) -> None:
+    """GET /api/v1/auth/me returns the stub caller identity."""
+    resp = await client.get("/api/v1/auth/me")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email"] == "test@sentineliq.test"
+    assert "platform_admin" in body["roles"]
+
+
+# ===========================================================================
+# Permission enforcement on events endpoints
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_requires_auth() -> None:
+    """GET /api/v1/events without a token returns 401."""
+    app.dependency_overrides = {}  # no auth override
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/events")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_forbidden_for_insufficient_role(
+    db_session: AsyncSession,
+) -> None:
+    """
+    A user with only 'audit_reviewer' (events:read only) cannot POST events
+    (requires events:ingest).
+    """
+    # Build a stub with audit_reviewer only
+    stub_user = User(
+        id=_id(), email="limited@test.com", full_name="Limited",
+        hashed_password="x", is_active=True, is_verified=True,
+    )
+    limited_auth = AuthenticatedUser(user=stub_user, roles=["audit_reviewer"])
+
+    app.dependency_overrides[get_current_user] = lambda: limited_auth
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/events",
+            json={
+                "event_type": "person_detected",
+                "event_timestamp": "2026-11-03T22:30:00Z",
+                "location_id": "LOADING_DOCK_3",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "FORBIDDEN"

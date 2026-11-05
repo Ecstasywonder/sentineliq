@@ -1,0 +1,417 @@
+"""
+AssessmentService — Gate 8.
+
+Orchestrates:
+  1. EvidenceAggregator.gather()  — collect all 7 evidence sources
+  2. _build_signals()             — derive FactorSignals from evidence
+  3. RiskEngine.assess()          — deterministic risk score (ADR-003)
+  4. ConfidenceEngine.assess()    — independent confidence score (ADR-004)
+  5. Persist RiskAssessment + ConfidenceAssessment rows
+  6. Denormalise risk/confidence back onto SecurityEvent
+  7. Transition event: normalised → assessing → awaiting_review
+
+The LLM is NOT called here — it is invoked later by the Triage/Explanation
+agents (Gate 14+).  This service is purely deterministic.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import UTC, datetime
+
+import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.models.assessment import ConfidenceAssessment, RiskAssessment
+from app.models.audit import AuditEvent
+from app.models.event import SecurityEvent
+from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
+from app.services.confidence_engine import ConfidenceEngine, SourceStatus
+from app.services.event_lifecycle import validate_transition
+from app.services.evidence_aggregator import EvidenceAggregator
+from app.services.risk_engine import FactorSignal, RiskEngine
+
+logger = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Source IDs — must match adapter source_id constants
+# ---------------------------------------------------------------------------
+_REQUIRED_SOURCE_IDS = (
+    "mock_access_control",
+    "mock_schedule",
+    "mock_work_order",
+    "mock_delivery",
+    "db_security_rules",
+    "db_incident_history",
+)
+
+
+# ---------------------------------------------------------------------------
+# Assessment Service
+# ---------------------------------------------------------------------------
+
+
+class AssessmentService:
+    """
+    Runs the full synchronous assessment pipeline for a single SecurityEvent.
+
+    Parameters
+    ----------
+    session:
+        Active async DB session.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._settings = get_settings()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def run(
+        self,
+        event_id: str,
+        *,
+        unavailable_source_ids: list[str] | None = None,
+        policy_version: str | None = None,
+    ) -> AssessmentResponse:
+        """
+        Execute the full assessment pipeline for *event_id*.
+
+        Args:
+            event_id:                ID of an existing SecurityEvent.
+            unavailable_source_ids:  Additional source IDs the caller knows
+                                     are offline (supplements aggregator errors).
+            policy_version:          Override the active risk policy version.
+
+        Returns:
+            AssessmentResponse ready to serialise to the caller.
+
+        Raises:
+            ValueError:  Event not found, or event is in a terminal state.
+            InvalidTransitionError:  Event status cannot transition to 'assessing'.
+        """
+        extra_unavailable = set(unavailable_source_ids or [])
+
+        # ---- 1. Load event ---------------------------------------------------
+        event = await self._load_event(event_id)
+
+        # ---- 2. Transition: current → assessing ------------------------------
+        validate_transition(event.status, "assessing")
+        event.status = "assessing"
+        self._session.add(event)
+        await self._session.flush()
+
+        # ---- 3. Gather evidence ---------------------------------------------
+        aggregator = EvidenceAggregator(self._session)
+        evidence = await aggregator.gather(
+            event_id,
+            event.location_id,
+            facility_id=event.facility_id,
+        )
+
+        # ---- 4. Build risk signals from evidence ----------------------------
+        signals = self._build_signals(evidence, event)
+
+        # ---- 5. Run Risk Engine (deterministic, no LLM) ---------------------
+        engine = RiskEngine(self._session)
+        risk_result = await engine.assess(
+            signals,
+            policy_version=policy_version or self._settings.active_risk_policy_version,
+        )
+
+        # ---- 6. Build confidence source statuses ----------------------------
+        sources = self._build_source_statuses(evidence, extra_unavailable)
+        tool_errors = list(evidence.errors.keys())
+
+        conf_engine = ConfidenceEngine()
+        conf_result = conf_engine.assess(
+            sources=sources,
+            has_contradictory_evidence=False,  # Gate 9+ will detect contradictions
+            incomplete_event_metadata=not bool(event.location_id),
+            tool_retrieval_errors=tool_errors,
+        )
+
+        # ---- 7. Persist assessment rows -------------------------------------
+        assessed_at = datetime.now(UTC).isoformat()
+        await self._persist_assessments(
+            event_id, risk_result, conf_result, assessed_at
+        )
+
+        # ---- 8. Denormalise onto event + transition to awaiting_review ------
+        event.risk_score = risk_result.risk_score
+        event.risk_level = risk_result.risk_level
+        event.confidence_score = conf_result.confidence_score
+        event.confidence_level = conf_result.confidence_level
+        validate_transition(event.status, "awaiting_review")
+        event.status = "awaiting_review"
+        self._session.add(event)
+
+        # Write immutable audit trail entry for the assessment
+        self._session.add(AuditEvent(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            action="risk_assessed",
+            actor="system:assessment_service",
+            occurred_at=assessed_at,
+            details_json=json.dumps({
+                "risk_score": risk_result.risk_score,
+                "risk_level": risk_result.risk_level,
+                "confidence_score": conf_result.confidence_score,
+                "confidence_level": conf_result.confidence_level,
+                "sources_available": conf_result.sources_available,
+                "evidence_errors": list(evidence.errors.keys()),
+            }),
+        ))
+
+        await self._session.flush()
+
+        logger.info(
+            "assessment_service.complete",
+            event_id=event_id,
+            risk_score=risk_result.risk_score,
+            risk_level=risk_result.risk_level,
+            confidence_score=conf_result.confidence_score,
+            confidence_level=conf_result.confidence_level,
+            evidence_errors=list(evidence.errors.keys()),
+        )
+
+        return AssessmentResponse(
+            event_id=event_id,
+            event_status=event.status,
+            risk_score=risk_result.risk_score,
+            risk_level=risk_result.risk_level,
+            risk_policy_version=risk_result.policy_version,
+            risk_factors=[
+                RiskFactorDetail(
+                    factor_id=f.factor_id,
+                    label=f.label,
+                    weight=f.weight,
+                    direction=f.direction,
+                    triggered=f.triggered,
+                    contribution=f.contribution,
+                )
+                for f in risk_result.factors
+            ],
+            confidence_score=conf_result.confidence_score,
+            confidence_level=conf_result.confidence_level,
+            confidence_reductions=[
+                ConfidenceReductionDetail(
+                    reason=r.reason,
+                    amount=r.amount,
+                    source_id=r.source_id,
+                    detail=r.detail,
+                )
+                for r in conf_result.reductions
+            ],
+            sources_available=conf_result.sources_available,
+            sources_required=conf_result.sources_required,
+            evidence_errors=evidence.errors,
+            assessed_at=assessed_at,
+        )
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    async def _load_event(self, event_id: str) -> SecurityEvent:
+        stmt = select(SecurityEvent).where(SecurityEvent.id == event_id)
+        result = await self._session.execute(stmt)
+        event: SecurityEvent | None = result.scalar_one_or_none()
+        if event is None:
+            raise ValueError(f"Event '{event_id}' not found.")
+        return event
+
+    def _build_signals(self, evidence, event: SecurityEvent) -> list[FactorSignal]:
+        """
+        Derive FactorSignal list from gathered evidence.
+
+        This is the deterministic signal extraction layer.  Each signal maps
+        to a ``factor_id`` in the active RiskPolicy.  Unknown factor IDs are
+        silently ignored by the RiskEngine (ADR-003).
+
+        Signals produced here (v1.0 policy factors):
+          after_hours_access   — access event outside business hours (naive: hour >= 20 or < 6)
+          unverified_person    — access_granted=False in any access event
+          no_work_order        — no active work order for this location
+          no_scheduled_entry   — no schedule entry covering this location
+          known_incident_area  — location has prior incidents in history
+          critical_zone        — security rule marks zone as restricted
+        """
+        signals: list[FactorSignal] = []
+
+        # --- after_hours_access -----------------------------------------------
+        after_hours = False
+        if evidence.access_events and evidence.access_events.records:
+            for rec in evidence.access_events.records:
+                try:
+                    hour = int(rec.occurred_at[11:13])  # "2026-11-03T22:00:00Z" → 22
+                    if hour >= 20 or hour < 6:
+                        after_hours = True
+                        break
+                except (ValueError, IndexError):
+                    pass
+        signals.append(
+            FactorSignal(
+                factor_id="after_hours_access",
+                triggered=after_hours,
+                source="access_events",
+            )
+        )
+
+        # --- unverified_person -----------------------------------------------
+        unverified = False
+        if evidence.access_events and evidence.access_events.records:
+            unverified = any(
+                not rec.access_granted for rec in evidence.access_events.records
+            )
+        signals.append(
+            FactorSignal(
+                factor_id="unverified_person",
+                triggered=unverified,
+                source="access_events",
+            )
+        )
+
+        # --- no_work_order ---------------------------------------------------
+        has_work_order = bool(
+            evidence.work_orders
+            and evidence.work_orders.meta.record_count > 0
+        )
+        signals.append(
+            FactorSignal(
+                factor_id="no_work_order",
+                triggered=not has_work_order,
+                source="work_orders",
+            )
+        )
+
+        # --- no_scheduled_entry ---------------------------------------------
+        has_schedule = bool(
+            evidence.schedule
+            and evidence.schedule.meta.record_count > 0
+        )
+        signals.append(
+            FactorSignal(
+                factor_id="no_scheduled_entry",
+                triggered=not has_schedule,
+                source="schedule",
+            )
+        )
+
+        # --- known_incident_area --------------------------------------------
+        has_incidents = bool(
+            evidence.incident_history
+            and evidence.incident_history.meta.record_count > 0
+        )
+        signals.append(
+            FactorSignal(
+                factor_id="known_incident_area",
+                triggered=has_incidents,
+                source="incident_history",
+            )
+        )
+
+        # --- critical_zone --------------------------------------------------
+        is_restricted = False
+        if evidence.location_policy and evidence.location_policy.records:
+            is_restricted = any(
+                r.rule_type in ("after_hours_restriction", "access_restriction", "restricted_zone")
+                for r in evidence.location_policy.records
+                if r.is_active
+            )
+        signals.append(
+            FactorSignal(
+                factor_id="critical_zone",
+                triggered=is_restricted,
+                source="location_policy",
+            )
+        )
+
+        return signals
+
+    def _build_source_statuses(
+        self,
+        evidence,
+        extra_unavailable: set[str],
+    ) -> list[SourceStatus]:
+        """Map aggregated evidence sections to SourceStatus for ConfidenceEngine."""
+        section_map = {
+            "mock_access_control": evidence.access_events,
+            "mock_schedule": evidence.schedule,
+            "mock_work_order": evidence.work_orders,
+            "mock_delivery": evidence.delivery,
+            "db_security_rules": evidence.location_policy,
+            "db_incident_history": evidence.incident_history,
+        }
+        statuses: list[SourceStatus] = []
+        for source_id in _REQUIRED_SOURCE_IDS:
+            section = section_map.get(source_id)
+            available = (
+                section is not None
+                and source_id not in evidence.errors
+                and source_id not in extra_unavailable
+            )
+            statuses.append(
+                SourceStatus(
+                    source_id=source_id,
+                    available=available,
+                    stale=False,
+                    required=True,
+                )
+            )
+        return statuses
+
+    async def _persist_assessments(
+        self,
+        event_id: str,
+        risk_result,
+        conf_result,
+        assessed_at: str,
+    ) -> None:
+        """
+        Upsert RiskAssessment and ConfidenceAssessment rows.
+
+        If an assessment already exists for this event (re-assessment),
+        delete the old row first so the unique constraint on event_id is
+        not violated.
+        """
+        from sqlalchemy import delete
+
+        # Delete existing assessments (idempotent re-assessment support)
+        await self._session.execute(
+            delete(RiskAssessment).where(RiskAssessment.event_id == event_id)
+        )
+        await self._session.execute(
+            delete(ConfidenceAssessment).where(ConfidenceAssessment.event_id == event_id)
+        )
+
+        risk_row = RiskAssessment(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            risk_policy_version=risk_result.policy_version,
+            risk_score=risk_result.risk_score,
+            risk_level=risk_result.risk_level,
+            risk_factors_json=risk_result.factors_json,
+            confidence_score=conf_result.confidence_score,
+            confidence_level=conf_result.confidence_level,
+            confidence_reductions_json=conf_result.reductions_json,
+            assessed_at=assessed_at,
+        )
+        conf_row = ConfidenceAssessment(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            confidence_score=conf_result.confidence_score,
+            confidence_level=conf_result.confidence_level,
+            reductions_json=conf_result.reductions_json,
+            sources_available=conf_result.sources_available,
+            sources_required=conf_result.sources_required,
+            assessed_at=assessed_at,
+        )
+        self._session.add(risk_row)
+        self._session.add(conf_row)
+        await self._session.flush()

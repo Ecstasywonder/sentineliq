@@ -1,0 +1,38 @@
+FROM python:3.11-slim
+
+# Security: run as non-root
+RUN groupadd --gid 1001 sentineliq \
+    && useradd --uid 1001 --gid sentineliq --shell /bin/bash --create-home sentineliq
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Copy dependency files first (layer caching)
+COPY pyproject.toml ./
+
+# Install dependencies
+RUN uv pip install --system -e ".[dev]"
+
+# Copy application code
+COPY . .
+
+# Create media directory
+RUN mkdir -p /app/media && chown sentineliq:sentineliq /app/media
+
+USER sentineliq
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

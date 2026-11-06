@@ -16,8 +16,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from app.services.triage_service import TriageService
 
+from app.services.triage_service import TriageService
 
 # ---------------------------------------------------------------------------
 # Helpers

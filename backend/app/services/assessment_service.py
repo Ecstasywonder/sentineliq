@@ -1,9 +1,10 @@
 """
-AssessmentService — Gate 8 / Gate 14.
+AssessmentService — Gate 8 / Gate 14 / Gate 15.
 
 Orchestrates:
   0. TriageService.run()          — classify event + identify required context (Gate 14)
   1. EvidenceAggregator.gather()  — collect all 7 evidence sources
+  1b. ContextService.run()        — interpret evidence, detect conflicts (Gate 15)
   2. _build_signals()             — derive FactorSignals from evidence
   3. RiskEngine.assess()          — deterministic risk score (ADR-003)
   4. ConfidenceEngine.assess()    — independent confidence score (ADR-004)
@@ -13,7 +14,7 @@ Orchestrates:
 
 Triage runs BEFORE the deterministic pipeline.  If Orchestrate is unavailable,
 TriageService automatically falls back to deterministic classification.
-The event is NEVER lost due to a triage failure.
+The event is NEVER lost due to a triage failure (Gate 14) or context failure (Gate 15).
 """
 
 from __future__ import annotations
@@ -31,8 +32,10 @@ from app.models.assessment import ConfidenceAssessment, RiskAssessment
 from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
+from app.schemas.context import ContextResultDetail
 from app.schemas.triage import TriageResultDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
+from app.services.context_service import ContextService
 from app.services.event_lifecycle import validate_transition
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.risk_engine import FactorSignal, RiskEngine
@@ -138,6 +141,21 @@ class AssessmentService:
             facility_id=event.facility_id,
         )
 
+        # ---- 3b. Context Agent — interpret evidence (Gate 15) ---------------
+        context_svc = ContextService(self._session)
+        context_result = await context_svc.run(
+            event_id=event_id,
+            event_metadata={
+                "event_type": event.event_type,
+                "event_timestamp": str(event.event_timestamp),
+                "location_id": event.location_id,
+                "facility_id": event.facility_id,
+                "zone": event.zone,
+            },
+            required_context=list(triage_result.required_context),
+            evidence=evidence,
+        )
+
         # ---- 4. Build risk signals from evidence ----------------------------
         signals = self._build_signals(evidence, event)
 
@@ -155,7 +173,7 @@ class AssessmentService:
         conf_engine = ConfidenceEngine()
         conf_result = conf_engine.assess(
             sources=sources,
-            has_contradictory_evidence=False,  # Gate 9+ will detect contradictions
+            has_contradictory_evidence=context_result.has_conflicts,
             incomplete_event_metadata=not bool(event.location_id),
             tool_retrieval_errors=tool_errors,
         )
@@ -213,10 +231,22 @@ class AssessmentService:
             agent_run_id=triage_result.agent_run_id,
         )
 
+        context_detail = ContextResultDetail(
+            source_statuses=context_result.source_statuses,
+            conflicts=context_result.conflicts,
+            missing_sources=context_result.missing_sources,
+            context_summary=context_result.context_summary,
+            has_conflicts=context_result.has_conflicts,
+            has_missing_sources=context_result.has_missing_sources,
+            source=context_result.source,
+            agent_run_id=context_result.agent_run_id,
+        )
+
         return AssessmentResponse(
             event_id=event_id,
             event_status=event.status,
             triage=triage_detail,
+            context=context_detail,
             risk_score=risk_result.risk_score,
             risk_level=risk_result.risk_level,
             risk_policy_version=risk_result.policy_version,

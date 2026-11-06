@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.schemas.context import ContextResultDetail
 from app.schemas.triage import TriageResultDetail
 
 # ---------------------------------------------------------------------------
@@ -65,6 +66,9 @@ class AssessmentResponse(BaseModel):
 
     # Triage (agent classification — Gate 14)
     triage: TriageResultDetail | None = None
+
+    # Context (agent evidence interpretation — Gate 15)
+    context: ContextResultDetail | None = None
 
     # Risk (deterministic, ADR-003)
     risk_score: float

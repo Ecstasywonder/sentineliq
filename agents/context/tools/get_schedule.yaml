@@ -1,0 +1,60 @@
+openapi: "3.1.0"
+info:
+  title: Get Schedule
+  version: "1.0"
+  description: >
+    Look up the scheduled authorised-access windows for a facility/location.
+    Returns entries showing which personnel or groups are expected at that
+    location and during which time ranges.
+
+paths:
+  /tools/schedule:
+    get:
+      operationId: get_schedule
+      summary: Retrieve scheduled-access entries for a location.
+      parameters:
+        - name: event_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: SentinelIQ event UUID — time window is derived from the event timestamp.
+        - name: location_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Facility or zone identifier.
+      responses:
+        "200":
+          description: Schedule entries covering the event time window.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source_id:
+                    type: string
+                    example: mock_schedule
+                  records:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        person_id:
+                          type: string
+                        scheduled_from:
+                          type: string
+                          format: date-time
+                        scheduled_to:
+                          type: string
+                          format: date-time
+                        location_id:
+                          type: string
+                  meta:
+                    type: object
+                    properties:
+                      record_count:
+                        type: integer
+        "503":
+          description: Schedule system unavailable.

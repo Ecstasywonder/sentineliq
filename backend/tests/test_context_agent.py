@@ -29,11 +29,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 
-from app.schemas.context import ContextResult
-from app.services.context_service import ContextService, _ALLOWED_STATUSES, _KNOWN_SOURCES
+from app.services.context_service import ContextService
 
 
 # ---------------------------------------------------------------------------

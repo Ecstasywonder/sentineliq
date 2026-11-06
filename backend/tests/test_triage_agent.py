@@ -16,10 +16,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 
-from app.schemas.triage import TriageResult
 from app.services.triage_service import TriageService
 
 

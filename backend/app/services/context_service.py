@@ -44,7 +44,11 @@ import structlog
 
 from app.config import get_settings
 from app.models.agent_run import AgentRun, ToolCall
-from app.schemas.context import ContextResult, ContextResultDetail, EvidenceConflict, SourceStatusRecord
+from app.schemas.context import (
+    ContextResult,
+    EvidenceConflict,
+    SourceStatusRecord,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -191,7 +195,7 @@ class ContextService:
                             missing=result.missing_sources,
                             duration_ms=round(duration_ms, 1))
                 return result
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("context.path_b.failed", event_id=event_id,
                                error=str(exc), fallthrough="path_a")
 
@@ -216,7 +220,7 @@ class ContextService:
                             missing=result.missing_sources,
                             duration_ms=round(duration_ms, 1))
                 return result
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 duration_ms = (time.monotonic() - t0) * 1000
                 logger.warning("context.path_a.failed", event_id=event_id,
                                error=str(exc), fallthrough="path_0")

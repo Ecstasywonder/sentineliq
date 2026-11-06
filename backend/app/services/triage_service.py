@@ -166,8 +166,6 @@ class TriageService:
         Returns TriageResult — always. Never raises.
         The ``source`` field records which path produced the result.
         """
-        from app.schemas.triage import TriageResult  # avoid circular import
-
         settings = self._settings
         effective_timeout = timeout or settings.agent_invoke_timeout
         run_id = str(uuid.uuid4())
@@ -193,7 +191,7 @@ class TriageService:
                 logger.info("triage.path_b.success", event_id=event_id,
                             category=result.category, duration_ms=round(duration_ms, 1))
                 return result
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("triage.path_b.failed", event_id=event_id,
                                error=str(exc), fallthrough="path_a")
 
@@ -216,7 +214,7 @@ class TriageService:
                 logger.info("triage.path_a.success", event_id=event_id,
                             category=result.category, duration_ms=round(duration_ms, 1))
                 return result
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 duration_ms = (time.monotonic() - t0) * 1000
                 logger.warning("triage.path_a.failed", event_id=event_id,
                                error=str(exc), fallthrough="path_0")

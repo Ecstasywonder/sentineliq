@@ -5,6 +5,10 @@
 **Date:** 2026-11-05  
 **Author:** IBM Bob (Principal Architect)
 
+> **Gate numbering:** This report retains the original roadmap label. It implements
+> Gate 11 (Triage Agent) in the canonical [Master Build Prompt](master-build-prompt.md).
+> Live watsonx Orchestrate tenant validation remains outstanding.
+
 ---
 
 ## Summary
@@ -227,22 +231,10 @@ SELECT id, agent_name, status, duration_ms, source FROM agent_runs ORDER BY crea
 
 ---
 
-## Next Gate
+## Historical next implementation step
 
-**Gate 15 — Context Agent**
+The original roadmap called the Context Agent Gate 15. It is Gate 12 in the
+canonical Master Build Prompt and is documented in
+[gate-15-context-agent.md](gate-15-context-agent.md).
 
-Implement the Context Agent in watsonx Orchestrate.  The Context Agent
-coordinates read-only evidence retrieval using the tool layer built in
-Gate 7:
-
-- `get_access_events`
-- `get_schedule_context`
-- `get_location_policy`
-- `search_incident_history`
-- `get_active_work_orders`
-- `get_delivery_context`
-- `get_integration_health`
-
-The Context Agent uses the `required_context` list from the Triage Agent
-to determine which tools to invoke.  It produces a structured evidence
-package that is validated before being passed to the risk engine.
+The next unfinished canonical gate is Gate 13 — Explanation Agent.

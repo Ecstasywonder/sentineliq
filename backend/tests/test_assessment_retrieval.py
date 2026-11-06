@@ -205,6 +205,23 @@ class TestGetAssessmentHappyPath:
         resp = await client.get(f"/api/v1/events/{event.id}/assessment")
         assert resp.json()["assessment_id"] == row.id
 
+    async def test_retrieval_contains_persisted_agent_and_workflow_bundle(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_and_assess(client, db_session)
+        resp = await client.get(f"/api/v1/events/{event.id}/assessment")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["triage"] is not None
+        assert data["context"] is not None
+        assert data["explanation"] is not None
+        assert data["explanation"]["recommended_action"]
+        assert data["workflow_state"] == {
+            "before": "assessing",
+            "after": "awaiting_review",
+        }
+        assert isinstance(data["evidence_errors"], dict)
+
 
 class TestGetAssessmentErrorCases:
     async def test_404_for_unknown_event(

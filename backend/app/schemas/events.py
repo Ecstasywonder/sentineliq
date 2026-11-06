@@ -12,7 +12,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.config import get_settings
 from app.models.event import EVENT_STATUSES, EVENT_TYPES
+from app.security.metadata import sanitize_metadata
 
 # ---------------------------------------------------------------------------
 # Inbound
@@ -85,6 +87,24 @@ class EventIngestRequest(BaseModel):
         if not v.strip():
             raise ValueError("event_timestamp must not be empty.")
         return v.strip()
+
+    @field_validator("raw_metadata")
+    @classmethod
+    def validate_raw_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        settings = get_settings()
+        return sanitize_metadata(
+            value,
+            max_bytes=settings.event_raw_metadata_max_bytes,
+            max_depth=settings.event_raw_metadata_max_depth,
+            max_keys=settings.event_raw_metadata_max_keys,
+            max_items=settings.event_raw_metadata_max_items,
+            max_string_bytes=settings.event_raw_metadata_max_string_bytes,
+        )
 
 
 # ---------------------------------------------------------------------------

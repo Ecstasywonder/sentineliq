@@ -19,6 +19,7 @@ from app.models.feedback import Feedback  # noqa: F401
 from app.models.incident import IncidentHistory  # noqa: F401
 from app.models.integration import IntegrationHealth  # noqa: F401
 from app.models.recommendation import Recommendation  # noqa: F401
+from app.models.refresh_token import RefreshToken, RefreshTokenFamily  # noqa: F401
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor  # noqa: F401
 from app.models.schedule import Schedule  # noqa: F401
 from app.models.security_rule import SecurityRule  # noqa: F401

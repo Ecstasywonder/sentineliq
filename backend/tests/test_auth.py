@@ -30,7 +30,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.user import Role, User, UserRole
 from app.security.dependencies import AuthenticatedUser, get_current_user
-from app.security.passwords import hash_password, verify_password
+from app.security.passwords import hash_password, verify_password, verify_password_or_dummy
 from app.security.rbac import has_permission, permissions_for_roles
 from app.security.tokens import (
     TokenError,
@@ -67,6 +67,9 @@ class TestPasswords:
     def test_two_hashes_differ(self):
         """bcrypt uses random salt per hash."""
         assert hash_password("same") != hash_password("same")
+
+    def test_unknown_user_still_uses_dummy_bcrypt(self):
+        assert verify_password_or_dummy("any-password", None) is False
 
 
 # ===========================================================================
@@ -290,8 +293,70 @@ async def test_login_disabled_account(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_token_issues_new_access(db_session: AsyncSession) -> None:
-    """A valid refresh token returns a new access token."""
+    """A refresh token issued by login rotates to a new one exactly once."""
     email = f"auth_refresh_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_resp = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        assert login_resp.status_code == 200
+        refresh = login_resp.json()["refresh_token"]
+
+        resp = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
+    assert resp.json()["refresh_token"] != refresh
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_replay_revokes_token_family(db_session: AsyncSession) -> None:
+    """Reusing a rotated token revokes the descendant issued from it."""
+    email = f"auth_replay_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_resp = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        original = login_resp.json()["refresh_token"]
+
+        first_rotation = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": original},
+        )
+        assert first_rotation.status_code == 200
+        descendant = first_rotation.json()["refresh_token"]
+
+        replay = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": original},
+        )
+        descendant_after_replay = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": descendant},
+        )
+
+    app.dependency_overrides.clear()
+    assert replay.status_code == 401
+    assert descendant_after_replay.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unregistered_signed_refresh_token_is_rejected(
+    db_session: AsyncSession,
+) -> None:
+    """A correctly signed JWT is unusable unless the server issued and stored it."""
+    email = f"auth_unregistered_{_id()[:8]}@test.com"
     user = await _seed_user(db_session, email, "pass")
     await db_session.commit()
 
@@ -302,8 +367,7 @@ async def test_refresh_token_issues_new_access(db_session: AsyncSession) -> None
             json={"refresh_token": refresh},
         )
     app.dependency_overrides.clear()
-    assert resp.status_code == 200
-    assert "access_token" in resp.json()
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio

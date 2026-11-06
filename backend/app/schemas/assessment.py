@@ -7,6 +7,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.schemas.context import ContextResultDetail
+from app.schemas.explanation import ExplanationResultDetail
 from app.schemas.triage import TriageResultDetail
 
 # ---------------------------------------------------------------------------
@@ -69,6 +70,9 @@ class AssessmentResponse(BaseModel):
 
     # Context (agent evidence interpretation — Gate 15)
     context: ContextResultDetail | None = None
+
+    # Explanation (grounded operator narrative — Master Build Prompt Gate 13)
+    explanation: ExplanationResultDetail | None = None
 
     # Risk (deterministic, ADR-003)
     risk_score: float
@@ -133,6 +137,12 @@ class AssessmentRetrievalResponse(BaseModel):
     confidence_reductions: list[ConfidenceReductionDetail]
     sources_available: int
     sources_required: int
+
+    triage: TriageResultDetail | None = None
+    context: ContextResultDetail | None = None
+    explanation: ExplanationResultDetail | None = None
+    evidence_errors: dict[str, str] = Field(default_factory=dict)
+    workflow_state: dict[str, str] = Field(default_factory=dict)
 
     assessed_at: str
     agent_run_id: str | None = None

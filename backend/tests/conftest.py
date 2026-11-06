@@ -1,10 +1,12 @@
 """
 Pytest configuration and shared fixtures for SentinelIQ backend tests.
 """
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -16,12 +18,26 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+# Force the test environment to disable external provider calls by default.
+# This keeps pytest deterministic even when a local .env file contains live IBM credentials.
+os.environ["APP_ENV"] = "test"
+for key in (
+    "WATSONX_API_KEY",
+    "ORCHESTRATE_API_KEY",
+    "ORCHESTRATE_URL",
+    "ORCHESTRATE_BASE_URL",
+    "WATSONX_SPACE_ID",
+    "ORCHESTRATE_SPACE_ID",
+):
+    os.environ.pop(key, None)
+
 from app.config import get_settings
 from app.db.session import Base, get_db
 from app.main import app
 from app.models.user import User
 from app.security.dependencies import AuthenticatedUser, get_current_user
 
+get_settings.cache_clear()
 settings = get_settings()
 
 # ---------------------------------------------------------------------------

@@ -137,6 +137,19 @@ CAMERAS = [
 SECURITY_RULES = [
     {
         "id": _id(),
+        "facility_id": None,
+        "location_id": None,
+        "rule_code": "SNTL-SOP-001-HUMAN-REVIEW",
+        "rule_type": "standard_operating_procedure",
+        "description": (
+            "SentinelIQ recommends and humans decide. Operators must review the full evidence "
+            "package, treat unavailable sources as uncertainty, and record an authorised human "
+            "decision before any operational action."
+        ),
+        "policy_reference": "SNTL-SOP-001",
+    },
+    {
+        "id": _id(),
         "facility_id": "fac-001",
         "location_id": "LOADING_DOCK_3",
         "rule_code": "SEC-POL-DOCK-001",

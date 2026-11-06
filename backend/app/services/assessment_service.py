@@ -1,5 +1,5 @@
 """
-AssessmentService — Gate 8 / Gate 14 / Gate 15.
+AssessmentService — Gate 8 / Gate 14 / Gate 15 / Master Build Prompt Gate 13.
 
 Orchestrates:
   0. TriageService.run()          — classify event + identify required context (Gate 14)
@@ -8,13 +8,13 @@ Orchestrates:
   2. _build_signals()             — derive FactorSignals from evidence
   3. RiskEngine.assess()          — deterministic risk score (ADR-003)
   4. ConfidenceEngine.assess()    — independent confidence score (ADR-004)
+  4b. ExplanationService.run()    — grounded operator narrative (Master Build Prompt Gate 13)
   5. Persist RiskAssessment + ConfidenceAssessment rows
   6. Denormalise risk/confidence back onto SecurityEvent
   7. Transition event: normalised → assessing → awaiting_review
 
-Triage runs BEFORE the deterministic pipeline.  If Orchestrate is unavailable,
-TriageService automatically falls back to deterministic classification.
-The event is NEVER lost due to a triage failure (Gate 14) or context failure (Gate 15).
+The event is NEVER lost due to a triage (legacy Gate 14), context (legacy Gate 15),
+or explanation (Master Build Prompt Gate 13) failure.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -33,11 +33,13 @@ from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
 from app.schemas.context import ContextResultDetail
+from app.schemas.explanation import ExplanationResultDetail
 from app.schemas.triage import TriageResultDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
 from app.services.context_service import ContextService
 from app.services.event_lifecycle import validate_transition
 from app.services.evidence_aggregator import EvidenceAggregator
+from app.services.explanation_service import ExplanationService
 from app.services.risk_engine import FactorSignal, RiskEngine
 from app.services.triage_service import TriageService
 
@@ -54,6 +56,15 @@ _REQUIRED_SOURCE_IDS = (
     "db_security_rules",
     "db_incident_history",
 )
+
+_EVIDENCE_ERROR_SOURCE_IDS = {
+    "access_events": "mock_access_control",
+    "schedule": "mock_schedule",
+    "work_orders": "mock_work_order",
+    "delivery": "mock_delivery",
+    "location_policy": "db_security_rules",
+    "incident_history": "db_incident_history",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +113,25 @@ class AssessmentService:
             ValueError:  Event not found, or event is in a terminal state.
             InvalidTransitionError:  Event status cannot transition to 'assessing'.
         """
-        extra_unavailable = set(unavailable_source_ids or [])
+        extra_unavailable = {
+            _EVIDENCE_ERROR_SOURCE_IDS.get(source_id, source_id)
+            for source_id in (unavailable_source_ids or [])
+        }
 
-        # ---- 1. Load event ---------------------------------------------------
-        event = await self._load_event(event_id)
+        # ---- 1. Atomically claim the event ----------------------------------
+        # The status update is the per-event compare-and-set.  On PostgreSQL a
+        # competing UPDATE waits for this transaction and then re-checks the
+        # predicate; SQLite applies the same conditional update after its write
+        # lock is released.  Exactly one caller can therefore enter the costly
+        # pipeline for a normalised/context-incomplete event.
+        event, existing_response = await self._claim_event(event_id)
+        if existing_response is not None:
+            logger.info(
+                "assessment_service.idempotent_replay",
+                event_id=event_id,
+                event_status=event.status,
+            )
+            return existing_response
 
         # ---- 0. Triage (Gate 14) — classify event, identify required context --
         triage_svc = TriageService(self._session)
@@ -126,12 +152,6 @@ class AssessmentService:
         # Store agent_run_id on the event for traceability
         if triage_result.agent_run_id:
             event.agent_run_id = triage_result.agent_run_id
-
-        # ---- 2. Transition: current → assessing ------------------------------
-        validate_transition(event.status, "assessing")
-        event.status = "assessing"
-        self._session.add(event)
-        await self._session.flush()
 
         # ---- 3. Gather evidence ---------------------------------------------
         aggregator = EvidenceAggregator(self._session)
@@ -167,8 +187,13 @@ class AssessmentService:
         )
 
         # ---- 6. Build confidence source statuses ----------------------------
-        sources = self._build_source_statuses(evidence, extra_unavailable)
-        tool_errors = list(evidence.errors.keys())
+        normalized_evidence_errors = self._normalize_evidence_errors(evidence.errors)
+        sources = self._build_source_statuses(
+            evidence,
+            extra_unavailable,
+            normalized_evidence_errors,
+        )
+        tool_errors = list(normalized_evidence_errors)
 
         conf_engine = ConfidenceEngine()
         conf_result = conf_engine.assess(
@@ -178,10 +203,48 @@ class AssessmentService:
             tool_retrieval_errors=tool_errors,
         )
 
+        # ---- 6b. Explanation Agent — grounded operator narrative (Gate 13) --
+        explanation_svc = ExplanationService(self._session)
+        risk_factors_dicts = [
+            {
+                "factor_id": f.factor_id,
+                "label": f.label,
+                "triggered": f.triggered,
+                "contribution": f.contribution,
+            }
+            for f in risk_result.factors
+        ]
+        explanation_result = await explanation_svc.run(
+            event_id=event_id,
+            event_metadata={
+                "event_type": event.event_type,
+                "event_timestamp": str(event.event_timestamp),
+                "location_id": event.location_id,
+                "facility_id": event.facility_id,
+                "zone": event.zone,
+            },
+            triage_result=triage_result,
+            context_result=context_result,
+            risk_score=risk_result.risk_score,
+            risk_level=risk_result.risk_level,
+            risk_factors=risk_factors_dicts,
+            confidence_score=conf_result.confidence_score,
+            confidence_level=conf_result.confidence_level,
+            evidence_errors=normalized_evidence_errors,
+            evidence=evidence,
+        )
+
         # ---- 7. Persist assessment rows -------------------------------------
         assessed_at = datetime.now(UTC).isoformat()
         await self._persist_assessments(
-            event_id, risk_result, conf_result, assessed_at
+            event_id,
+            risk_result,
+            conf_result,
+            triage_result,
+            context_result,
+            explanation_result,
+            normalized_evidence_errors,
+            assessed_at,
         )
 
         # ---- 8. Denormalise onto event + transition to awaiting_review ------
@@ -206,7 +269,17 @@ class AssessmentService:
                 "confidence_score": conf_result.confidence_score,
                 "confidence_level": conf_result.confidence_level,
                 "sources_available": conf_result.sources_available,
-                "evidence_errors": list(evidence.errors.keys()),
+                "evidence_errors": normalized_evidence_errors,
+                "triage_agent_run_id": triage_result.agent_run_id,
+                "context_agent_run_id": context_result.agent_run_id,
+                "explanation_agent_run_id": explanation_result.agent_run_id,
+                "triage": triage_result.model_dump(mode="json"),
+                "context": context_result.model_dump(mode="json"),
+                "explanation": explanation_result.model_dump(mode="json"),
+                "workflow_state": {
+                    "before": "assessing",
+                    "after": "awaiting_review",
+                },
             }),
         ))
 
@@ -219,7 +292,7 @@ class AssessmentService:
             risk_level=risk_result.risk_level,
             confidence_score=conf_result.confidence_score,
             confidence_level=conf_result.confidence_level,
-            evidence_errors=list(evidence.errors.keys()),
+            evidence_errors=list(normalized_evidence_errors),
         )
 
         triage_detail = TriageResultDetail(
@@ -242,11 +315,27 @@ class AssessmentService:
             agent_run_id=context_result.agent_run_id,
         )
 
+        explanation_detail = ExplanationResultDetail(
+            summary=explanation_result.summary,
+            risk_level=explanation_result.risk_level,
+            risk_score=explanation_result.risk_score,
+            confidence_score=explanation_result.confidence_score,
+            why=explanation_result.why,
+            missing_evidence=explanation_result.missing_evidence,
+            limitations=explanation_result.limitations,
+            recommended_action=explanation_result.recommended_action,
+            has_missing_evidence=explanation_result.has_missing_evidence,
+            has_limitations=explanation_result.has_limitations,
+            source=explanation_result.source,
+            agent_run_id=explanation_result.agent_run_id,
+        )
+
         return AssessmentResponse(
             event_id=event_id,
             event_status=event.status,
             triage=triage_detail,
             context=context_detail,
+            explanation=explanation_detail,
             risk_score=risk_result.risk_score,
             risk_level=risk_result.risk_level,
             risk_policy_version=risk_result.policy_version,
@@ -274,7 +363,7 @@ class AssessmentService:
             ],
             sources_available=conf_result.sources_available,
             sources_required=conf_result.sources_required,
-            evidence_errors=evidence.errors,
+            evidence_errors=normalized_evidence_errors,
             assessed_at=assessed_at,
         )
 
@@ -283,12 +372,161 @@ class AssessmentService:
     # ------------------------------------------------------------------
 
     async def _load_event(self, event_id: str) -> SecurityEvent:
-        stmt = select(SecurityEvent).where(SecurityEvent.id == event_id)
+        stmt = (
+            select(SecurityEvent)
+            .where(SecurityEvent.id == event_id)
+            .execution_options(populate_existing=True)
+        )
         result = await self._session.execute(stmt)
         event: SecurityEvent | None = result.scalar_one_or_none()
         if event is None:
             raise ValueError(f"Event '{event_id}' not found.")
         return event
+
+    async def _claim_event(
+        self,
+        event_id: str,
+    ) -> tuple[SecurityEvent, AssessmentResponse | None]:
+        """Claim one assessment run or replay its already-persisted result.
+
+        ``normalised`` is the normal entry state. ``context_incomplete`` is
+        also claimable so an operator can retry a run after missing evidence is
+        restored. An existing assessment in any later lifecycle state is
+        returned without resetting that state, which keeps human decisions
+        non-bypassable and makes duplicate POSTs idempotent.
+        """
+        claim = (
+            update(SecurityEvent)
+            .where(
+                SecurityEvent.id == event_id,
+                SecurityEvent.status.in_(("normalised", "context_incomplete")),
+            )
+            .values(status="assessing")
+            .execution_options(synchronize_session=False)
+        )
+        result = await self._session.execute(claim)
+        if result.rowcount == 1:
+            event = await self._load_event(event_id)
+            return event, None
+
+        event = await self._load_event(event_id)
+        persisted = await self._response_from_persisted(event)
+        if persisted is not None:
+            return event, persisted
+
+        if event.status == "assessing":
+            raise ValueError(
+                f"Event '{event_id}' is already being assessed by another request."
+            )
+
+        # Preserve the lifecycle service's precise error for terminal or
+        # otherwise invalid states.
+        validate_transition(event.status, "assessing")
+        raise ValueError(
+            f"Event '{event_id}' could not be claimed for assessment from "
+            f"status '{event.status}'."
+        )
+
+    async def _response_from_persisted(
+        self,
+        event: SecurityEvent,
+    ) -> AssessmentResponse | None:
+        """Reconstruct an idempotent response without re-running any agents."""
+        risk_result = await self._session.execute(
+            select(RiskAssessment).where(RiskAssessment.event_id == event.id)
+        )
+        risk_row = risk_result.scalar_one_or_none()
+        if risk_row is None:
+            return None
+
+        conf_result = await self._session.execute(
+            select(ConfidenceAssessment).where(
+                ConfidenceAssessment.event_id == event.id
+            )
+        )
+        conf_row = conf_result.scalar_one_or_none()
+
+        def _json_value(raw: str | None, default):
+            if not raw:
+                return default
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError):
+                return default
+
+        def _snapshot(raw: str | None, schema):
+            value = _json_value(raw, None)
+            if not isinstance(value, dict):
+                return None
+            try:
+                return schema(**value)
+            except (TypeError, ValueError):
+                return None
+
+        factors: list[RiskFactorDetail] = []
+        for value in _json_value(risk_row.risk_factors_json, []):
+            try:
+                factors.append(RiskFactorDetail(**value))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "assessment_service.invalid_persisted_factor",
+                    event_id=event.id,
+                )
+
+        reductions: list[ConfidenceReductionDetail] = []
+        reductions_raw = (
+            conf_row.reductions_json
+            if conf_row is not None
+            else risk_row.confidence_reductions_json
+        )
+        for value in _json_value(reductions_raw, []):
+            try:
+                reductions.append(ConfidenceReductionDetail(**value))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "assessment_service.invalid_persisted_reduction",
+                    event_id=event.id,
+                )
+
+        triage = _snapshot(risk_row.triage_result_json, TriageResultDetail)
+        context = _snapshot(risk_row.context_result_json, ContextResultDetail)
+        explanation = _snapshot(
+            risk_row.explanation_result_json,
+            ExplanationResultDetail,
+        )
+        evidence_errors = _json_value(risk_row.evidence_errors_json, {})
+        if not isinstance(evidence_errors, dict):
+            evidence_errors = {}
+
+        confidence_score = (
+            conf_row.confidence_score
+            if conf_row is not None
+            else risk_row.confidence_score or 0.0
+        )
+        confidence_level = (
+            conf_row.confidence_level
+            if conf_row is not None
+            else risk_row.confidence_level or "low"
+        )
+
+        return AssessmentResponse(
+            event_id=event.id,
+            event_status=event.status,
+            triage=triage,
+            context=context,
+            explanation=explanation,
+            risk_score=risk_row.risk_score,
+            risk_level=risk_row.risk_level,
+            risk_policy_version=risk_row.risk_policy_version,
+            risk_factors=factors,
+            confidence_score=confidence_score,
+            confidence_level=confidence_level,
+            confidence_reductions=reductions,
+            sources_available=conf_row.sources_available if conf_row else 0,
+            sources_required=conf_row.sources_required if conf_row else 0,
+            evidence_errors=evidence_errors,
+            assessed_at=risk_row.assessed_at,
+        )
 
     def _build_signals(self, evidence, event: SecurityEvent) -> list[FactorSignal]:
         """
@@ -402,6 +640,7 @@ class AssessmentService:
         self,
         evidence,
         extra_unavailable: set[str],
+        normalized_errors: dict[str, str] | None = None,
     ) -> list[SourceStatus]:
         """Map aggregated evidence sections to SourceStatus for ConfidenceEngine."""
         section_map = {
@@ -417,7 +656,7 @@ class AssessmentService:
             section = section_map.get(source_id)
             available = (
                 section is not None
-                and source_id not in evidence.errors
+                and source_id not in (normalized_errors or {})
                 and source_id not in extra_unavailable
             )
             statuses.append(
@@ -430,11 +669,22 @@ class AssessmentService:
             )
         return statuses
 
+    def _normalize_evidence_errors(self, errors: dict[str, str]) -> dict[str, str]:
+        """Translate aggregator section keys to canonical adapter/source IDs."""
+        return {
+            _EVIDENCE_ERROR_SOURCE_IDS.get(section, section): message
+            for section, message in errors.items()
+        }
+
     async def _persist_assessments(
         self,
         event_id: str,
         risk_result,
         conf_result,
+        triage_result,
+        context_result,
+        explanation_result,
+        evidence_errors: dict[str, str],
         assessed_at: str,
     ) -> None:
         """
@@ -464,7 +714,18 @@ class AssessmentService:
             confidence_score=conf_result.confidence_score,
             confidence_level=conf_result.confidence_level,
             confidence_reductions_json=conf_result.reductions_json,
+            triage_result_json=json.dumps(triage_result.model_dump(mode="json"), default=str),
+            context_result_json=json.dumps(context_result.model_dump(mode="json"), default=str),
+            explanation_result_json=json.dumps(
+                explanation_result.model_dump(mode="json"), default=str
+            ),
+            evidence_errors_json=json.dumps(evidence_errors),
+            workflow_state_json=json.dumps({
+                "before": "assessing",
+                "after": "awaiting_review",
+            }),
             assessed_at=assessed_at,
+            agent_run_id=explanation_result.agent_run_id,
         )
         conf_row = ConfidenceAssessment(
             id=str(uuid.uuid4()),

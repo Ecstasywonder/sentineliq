@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import (
     AssessEventRequest,
@@ -44,6 +45,8 @@ from app.schemas.assessment import (
     ConfidenceReductionDetail,
     RiskFactorDetail,
 )
+from app.schemas.context import ContextResultDetail
+from app.schemas.explanation import ExplanationResultDetail
 from app.schemas.events import (
     VALID_STATUSES,
     ErrorDetail,
@@ -51,7 +54,8 @@ from app.schemas.events import (
     EventListResponse,
     EventResponse,
 )
-from app.security.dependencies import require_permission
+from app.schemas.triage import TriageResultDetail
+from app.security.dependencies import AuthenticatedUser, require_permission
 from app.services.assessment_service import AssessmentService
 from app.services.event_lifecycle import InvalidTransitionError, validate_transition
 
@@ -174,7 +178,12 @@ async def ingest_event(
     # ------------------------------------------------------------------
     raw_metadata_json: str | None = None
     if payload.raw_metadata is not None:
-        raw_metadata_json = json.dumps(payload.raw_metadata)
+        raw_metadata_json = json.dumps(
+            payload.raw_metadata,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
 
     normalised_data = json.dumps(
         {
@@ -337,6 +346,7 @@ async def list_events(
 
 @router.get(
     "/{event_id}",
+    operation_id="get_event_detail",
     response_model=EventResponse,
     summary="Retrieve a single security event",
     dependencies=[Depends(require_permission("events:read"))],
@@ -374,11 +384,19 @@ class StatusTransitionRequest(BaseModel):
     reason: str | None = None
 
 
+_DECISION_ONLY_STATUSES = frozenset({
+    "awaiting_review",
+    "context_incomplete",
+    "escalated",
+    "closed",
+    "dismissed",
+})
+
+
 @router.patch(
     "/{event_id}/status",
     response_model=EventResponse,
     summary="Advance event lifecycle status",
-    dependencies=[Depends(require_permission("events:decide"))],
     responses={
         200: {"description": "Status updated"},
         401: {"description": "Not authenticated"},
@@ -392,6 +410,7 @@ async def update_event_status(
     event_id: str,
     body: StatusTransitionRequest,
     session: AsyncSession = Depends(get_db),
+    actor: AuthenticatedUser = Depends(require_permission("events:decide")),
 ) -> EventResponse:
     """
     Advance a security event to a new lifecycle status.
@@ -429,7 +448,34 @@ async def update_event_status(
             ).model_dump(),
         ) from exc
 
+    if body.status in _DECISION_ONLY_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=ErrorDetail(
+                code="DECISION_REQUIRED",
+                message=(
+                    f"Status '{body.status}' is controlled by the assessment, decision, "
+                    "or escalation workflow and cannot be set directly."
+                ),
+            ).model_dump(),
+        )
+
+    prior_status = event.status
     event.status = body.status
+    session.add(AuditEvent(
+        id=_new_id(),
+        event_id=event_id,
+        action="event_status_transitioned",
+        actor=actor.email,
+        actor_role=actor.roles[0] if actor.roles else "unknown",
+        occurred_at=_now_iso(),
+        details_json=json.dumps({
+            "prior_status": prior_status,
+            "target_status": body.status,
+            "reason": body.reason,
+            "route": "PATCH /events/{id}/status",
+        }),
+    ))
     await session.flush()
 
     logger.info(
@@ -607,6 +653,29 @@ async def get_assessment(
         except (ValueError, KeyError):
             pass
 
+    def _load_snapshot(raw: str | None, schema):
+        if not raw:
+            return None
+        try:
+            return schema(**_json.loads(raw))
+        except (TypeError, ValueError, KeyError):
+            return None
+
+    triage = _load_snapshot(risk_row.triage_result_json, TriageResultDetail)
+    context = _load_snapshot(risk_row.context_result_json, ContextResultDetail)
+    explanation = _load_snapshot(
+        risk_row.explanation_result_json,
+        ExplanationResultDetail,
+    )
+    try:
+        evidence_errors = _json.loads(risk_row.evidence_errors_json or "{}")
+    except (TypeError, ValueError):
+        evidence_errors = {}
+    try:
+        workflow_state = _json.loads(risk_row.workflow_state_json or "{}")
+    except (TypeError, ValueError):
+        workflow_state = {}
+
     return AssessmentRetrievalResponse(
         assessment_id=risk_row.id,
         event_id=event_id,
@@ -619,6 +688,11 @@ async def get_assessment(
         confidence_reductions=conf_reductions,
         sources_available=conf_row.sources_available if conf_row else 0,
         sources_required=conf_row.sources_required if conf_row else 0,
+        triage=triage,
+        context=context,
+        explanation=explanation,
+        evidence_errors=evidence_errors,
+        workflow_state=workflow_state,
         assessed_at=risk_row.assessed_at,
         agent_run_id=risk_row.agent_run_id,
     )

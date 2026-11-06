@@ -8,10 +8,13 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sentineliq
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev_only}
+      # Deliberately no default: a database must never be started with a
+      # documented credential, including in a development EC2 instance.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your shell or root .env}
       POSTGRES_DB: sentineliq
     ports:
-      - "5432:5432"
+      # Host-only for local tools.  Other services use the Docker network.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
@@ -36,12 +39,11 @@ services:
     env_file:
       - ../../backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://sentineliq:${POSTGRES_PASSWORD:-changeme_dev_only}@postgres:5432/sentineliq
-      DATABASE_URL_SYNC: postgresql://sentineliq:${POSTGRES_PASSWORD:-changeme_dev_only}@postgres:5432/sentineliq
+      DATABASE_URL: postgresql+asyncpg://sentineliq:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your shell or root .env}@postgres:5432/sentineliq
+      DATABASE_URL_SYNC: postgresql://sentineliq:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your shell or root .env}@postgres:5432/sentineliq
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
-      - ../../backend:/app
       - media_data:/app/media
     depends_on:
       postgres:
@@ -67,7 +69,7 @@ services:
     environment:
       VITE_API_BASE_URL: http://localhost:8000
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy

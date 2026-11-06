@@ -7,6 +7,10 @@
 **Branch:** `gate-14-triage-agent`  
 **Status:** ✅ Complete
 
+> **Gate numbering:** This report retains the original roadmap label. It implements
+> Gate 12 (Context Agent) in the canonical [Master Build Prompt](master-build-prompt.md).
+> Live watsonx Orchestrate tenant validation remains outstanding.
+
 ---
 
 ## Objective

@@ -54,6 +54,8 @@ from app.models.audit import AuditEvent
 from app.models.decision import OperatorDecision
 from app.models.event import SecurityEvent
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
+from app.models.user import User
+from app.security.dependencies import AuthenticatedUser, get_current_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -526,6 +528,71 @@ class TestPostDecisionErrors:
             json={"decision": "accept"},
         )
         assert resp.status_code == 409
+
+
+class TestDecisionSpecificPermissions:
+    @staticmethod
+    def _auth(role: str) -> AuthenticatedUser:
+        user = User(
+            id=f"permission-user-{role}",
+            email=f"{role}@sentineliq.test",
+            full_name=f"{role} test user",
+            hashed_password="$2b$12$unused",
+            is_active=True,
+            is_verified=True,
+        )
+        return AuthenticatedUser(user=user, roles=[role])
+
+    async def _with_role(self, role: str, call):
+        from app.main import app
+
+        previous = app.dependency_overrides[get_current_user]
+        app.dependency_overrides[get_current_user] = lambda: self._auth(role)
+        try:
+            return await call()
+        finally:
+            app.dependency_overrides[get_current_user] = previous
+
+    async def test_officer_cannot_override(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_awaiting(client, db_session)
+        resp = await self._with_role(
+            "officer",
+            lambda: client.post(
+                f"/api/v1/events/{event.id}/decision",
+                json={"decision": "override", "is_override": True},
+            ),
+        )
+        assert resp.status_code == 403
+        assert "events:override" in resp.json()["detail"]["message"]
+
+    async def test_officer_can_escalate(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_awaiting(client, db_session)
+        resp = await self._with_role(
+            "officer",
+            lambda: client.post(
+                f"/api/v1/events/{event.id}/decision",
+                json={"decision": "escalate"},
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+
+    async def test_response_team_cannot_escalate(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_awaiting(client, db_session)
+        resp = await self._with_role(
+            "response_team",
+            lambda: client.post(
+                f"/api/v1/events/{event.id}/decision",
+                json={"decision": "escalate"},
+            ),
+        )
+        assert resp.status_code == 403
+        assert "events:escalate" in resp.json()["detail"]["message"]
 
     async def test_409_event_in_assessing_status(
         self, client: AsyncClient, db_session: AsyncSession

@@ -655,7 +655,6 @@ async def test_assess_response_includes_context(db_session, client):
         event_timestamp="2026-11-03T22:00:00Z",
         location_id="ZONE-A",
         status="normalised",
-        raw_payload_json="{}",
     )
     db_session.add(event)
     await db_session.flush()

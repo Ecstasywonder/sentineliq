@@ -37,8 +37,8 @@ Gates are executed in order. No gate is considered complete until:
 | **12** | Audit Trail API | ✅ Complete | `docs/gate-12-audit-trail-api.md` |
 | **13** | Feedback API | ✅ Complete | `docs/gate-13-feedback-api.md` |
 | **14** | Triage Agent (watsonx Orchestrate) | ✅ Complete | `docs/gate-14-triage-agent.md` |
-| **15** | Context Agent (watsonx Orchestrate) | 🔲 Next | — |
-| **16** | Explanation Agent (watsonx Orchestrate) | 🔲 Pending | — |
+| **15** | Context Agent (watsonx Orchestrate) | ✅ Complete | `docs/gate-15-context-agent.md` |
+| **16** | Explanation Agent (watsonx Orchestrate) | 🔲 Next | — |
 | **17** | Sentinel Coordinator (watsonx Orchestrate) | 🔲 Pending | — |
 | **18** | Agent Tool Schemas (OpenAPI → Orchestrate) | 🔲 Pending | — |
 | **19** | End-to-End Assessment Flow (Agents + Backend) | 🔲 Pending | — |

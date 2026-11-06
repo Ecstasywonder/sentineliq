@@ -1,0 +1,139 @@
+openapi: "3.1.0"
+info:
+  title: "SentinelIQ — get_event_detail tool"
+  version: "1.0.0"
+  description: >
+    Retrieves the normalised metadata for a single security event.
+    Used by the Triage Agent to obtain structured event fields for classification.
+
+servers:
+  - url: "{SENTINELIQ_API_BASE_URL}"
+    variables:
+      SENTINELIQ_API_BASE_URL:
+        default: "http://localhost:8000"
+        description: "SentinelIQ backend base URL"
+
+paths:
+  /api/v1/events/{event_id}:
+    get:
+      operationId: get_event_detail
+      summary: "Retrieve a single security event by ID"
+      description: >
+        Returns the normalised event record including event_type, event_timestamp,
+        location_id, zone, detector_confidence, camera_id, facility_id, status,
+        and current risk/confidence summaries.
+        The Triage Agent calls this to obtain event metadata before classification.
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "SentinelIQ event UUID"
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: "Event found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDetail"
+        "401":
+          description: "Unauthorised — missing or invalid bearer token"
+        "404":
+          description: "Event not found"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RiskSummary:
+      type: object
+      properties:
+        score:
+          type: number
+          nullable: true
+        level:
+          type: string
+          nullable: true
+
+    ConfidenceSummary:
+      type: object
+      properties:
+        score:
+          type: number
+          nullable: true
+        level:
+          type: string
+          nullable: true
+
+    EventDetail:
+      type: object
+      required:
+        - id
+        - event_type
+        - event_timestamp
+        - location_id
+        - status
+      properties:
+        id:
+          type: string
+          description: "SentinelIQ event UUID"
+        provider_event_id:
+          type: string
+          nullable: true
+        source_adapter:
+          type: string
+        event_type:
+          type: string
+          enum:
+            - person_detected
+            - door_forced
+            - motion_detected
+            - badge_event
+            - delivery_detected
+            - vehicle_detected
+            - alarm_triggered
+            - other
+        event_timestamp:
+          type: string
+          format: date-time
+        location_id:
+          type: string
+        facility_id:
+          type: string
+          nullable: true
+        camera_id:
+          type: string
+          nullable: true
+        zone:
+          type: string
+          nullable: true
+        detector_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+        thumbnail_url:
+          type: string
+          nullable: true
+        status:
+          type: string
+        risk:
+          $ref: "#/components/schemas/RiskSummary"
+        confidence:
+          $ref: "#/components/schemas/ConfidenceSummary"
+        agent_run_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

@@ -1,0 +1,57 @@
+openapi: "3.1.0"
+info:
+  title: Get Access Events
+  version: "1.0"
+  description: >
+    Retrieve badge/access-control records for a given event location and time
+    window. Returns a list of access log entries showing who attempted entry,
+    whether access was granted, and when.
+
+paths:
+  /tools/access-events:
+    get:
+      operationId: get_access_events
+      summary: Retrieve access-control log entries for an event location.
+      parameters:
+        - name: event_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: SentinelIQ event UUID — scopes the time window automatically.
+        - name: location_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Physical location identifier (door, gate, zone entry-point).
+      responses:
+        "200":
+          description: Access event log for the location.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source_id:
+                    type: string
+                    example: mock_access_control
+                  records:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        person_id:
+                          type: string
+                        access_granted:
+                          type: boolean
+                        occurred_at:
+                          type: string
+                          format: date-time
+                  meta:
+                    type: object
+                    properties:
+                      record_count:
+                        type: integer
+        "503":
+          description: Access-control system unavailable.

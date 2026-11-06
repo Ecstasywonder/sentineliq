@@ -57,11 +57,80 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # -------------------------------------------------------------------------
-    # IBM watsonx Orchestrate
+    # IBM watsonx Orchestrate (Path B — primary when provisioned)
     # -------------------------------------------------------------------------
-    orchestrate_base_url: str = ""
+    # Full tenant URL of the watsonx Orchestrate SaaS instance.
+    # Format: https://<tenant>.ibm-watson-orchestrate.com
+    # When set + orchestrate_api_key is set → Path B is active.
+    # Leave empty to fall through to Path A (watsonx.ai direct).
+    orchestrate_url: str = ""
     orchestrate_api_key: str = ""
-    orchestrate_space_id: str = ""
+    # Agent IDs as imported into Orchestrate (set after `orchestrate agents import`)
+    orchestrate_triage_agent_id: str = "sentinel_triage_agent"
+    orchestrate_context_agent_id: str = "sentinel_context_agent"
+    orchestrate_explanation_agent_id: str = "sentinel_explanation_agent"
+    orchestrate_coordinator_agent_id: str = "sentinel_coordinator"
+
+    # -------------------------------------------------------------------------
+    # IBM watsonx.ai (Path A — verified fallback)
+    # -------------------------------------------------------------------------
+    # Base URL for the watsonx.ai ML API.
+    # Verified: https://us-south.ml.cloud.ibm.com
+    watsonx_base_url: str = "https://us-south.ml.cloud.ibm.com"
+    # IBM Cloud API key — same key works for both Orchestrate and watsonx.ai.
+    # Used to obtain short-lived IAM bearer tokens.
+    watsonx_api_key: str = ""
+    # Space ID — must have a Watson Machine Learning instance associated.
+    # Verified working: Orchestrate (Developer edition) space.
+    watsonx_space_id: str = ""
+    # Model used for agent calls via watsonx.ai Chat API.
+    # Verified: ibm/granite-4-h-small supports text_chat.
+    watsonx_model_id: str = "ibm/granite-4-h-small"
+
+    # -------------------------------------------------------------------------
+    # Agent invocation config (shared)
+    # -------------------------------------------------------------------------
+    # Timeout in seconds for a single agent/LLM call.
+    agent_invoke_timeout: float = 45.0
+    # Maximum retries before falling back to the next path.
+    agent_max_retries: int = 1
+
+    # ---------------------------------------------------------------------------
+    # Backwards-compat shims (deprecated field names — will be removed in Gate 20)
+    # Kept so existing .env files that still set ORCHESTRATE_BASE_URL /
+    # ORCHESTRATE_SPACE_ID continue to work.
+    # ---------------------------------------------------------------------------
+    orchestrate_base_url: str = ""   # remapped → watsonx_base_url if set
+    orchestrate_space_id: str = ""   # remapped → watsonx_space_id if set
+
+    @property
+    def effective_watsonx_base_url(self) -> str:
+        """Return the active watsonx.ai base URL, respecting legacy env var."""
+        return self.watsonx_base_url or self.orchestrate_base_url
+
+    @property
+    def effective_watsonx_space_id(self) -> str:
+        """Return the active space ID, respecting legacy env var."""
+        return self.watsonx_space_id or self.orchestrate_space_id
+
+    @property
+    def effective_watsonx_api_key(self) -> str:
+        """Return the active API key (watsonx_api_key preferred, else orchestrate_api_key)."""
+        return self.watsonx_api_key or self.orchestrate_api_key
+
+    @property
+    def orchestrate_active(self) -> bool:
+        """True when a watsonx Orchestrate SaaS tenant URL is configured."""
+        return bool(self.orchestrate_url and self.effective_watsonx_api_key)
+
+    @property
+    def watsonx_active(self) -> bool:
+        """True when the watsonx.ai Chat API is usable (Path A)."""
+        return bool(
+            self.effective_watsonx_base_url
+            and self.effective_watsonx_api_key
+            and self.effective_watsonx_space_id
+        )
 
     # -------------------------------------------------------------------------
     # CORS

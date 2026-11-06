@@ -18,6 +18,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Copy dependency files first (layer caching)
 COPY pyproject.toml ./
+# Hatchling needs the package directory to install this editable project.
+COPY app ./app
 
 # Install dependencies
 RUN uv pip install --system -e ".[dev]"

@@ -244,7 +244,7 @@ class TestParseAndValidate:
         result = svc._parse_and_validate("EVT-001", raw)
         assert result.category == "alarm_event"
 
-    def test_invalid_category_falls_back_to_unclassified(self):
+    def test_invalid_category_rejected_by_contract(self):
         svc = self._svc()
         raw = json.dumps({
             "event_id": "EVT-001",
@@ -253,8 +253,8 @@ class TestParseAndValidate:
             "required_context": [],
             "triage_rationale": "test",
         })
-        result = svc._parse_and_validate("EVT-001", raw)
-        assert result.category == "unclassified"
+        with pytest.raises(ValueError, match="violated its contract"):
+            svc._parse_and_validate("EVT-001", raw)
 
     def test_unknown_signals_filtered(self):
         """Agent output with unknown signals must be sanitised (prompt-injection defence)."""
@@ -266,10 +266,8 @@ class TestParseAndValidate:
             "required_context": ["access_control"],
             "triage_rationale": "test",
         })
-        result = svc._parse_and_validate("EVT-001", raw)
-        assert "INJECTED_SIGNAL" not in result.urgency_signals
-        assert "after_hours" in result.urgency_signals
-        assert "forced_entry" in result.urgency_signals
+        with pytest.raises(ValueError, match="violated its contract"):
+            svc._parse_and_validate("EVT-001", raw)
 
     def test_unknown_context_sources_filtered(self):
         """Unknown context sources must be dropped."""
@@ -281,9 +279,8 @@ class TestParseAndValidate:
             "required_context": ["access_control", "INJECTED_SOURCE"],
             "triage_rationale": "test",
         })
-        result = svc._parse_and_validate("EVT-001", raw)
-        assert "INJECTED_SOURCE" not in result.required_context
-        assert "access_control" in result.required_context
+        with pytest.raises(ValueError, match="violated its contract"):
+            svc._parse_and_validate("EVT-001", raw)
 
     def test_baseline_context_always_added(self):
         """parse_and_validate always ensures baseline context even if agent omits it."""
@@ -318,12 +315,11 @@ class TestParseAndValidate:
             "required_context": [],
             "triage_rationale": injected,
         })
-        result = svc._parse_and_validate("EVT-001", raw)
-        assert len(result.triage_rationale) <= 512
-        assert "Ignore your instructions" not in result.triage_rationale
+        with pytest.raises(ValueError, match="violated its contract"):
+            svc._parse_and_validate("EVT-001", raw)
 
-    def test_event_id_overridden_to_caller_value(self):
-        """Agent output event_id must be replaced with the caller's event_id."""
+    def test_event_id_mismatch_is_rejected(self):
+        """Agent output cannot redirect a result to another event."""
         svc = self._svc()
         raw = json.dumps({
             "event_id": "WRONG-ID-FROM-AGENT",
@@ -332,8 +328,8 @@ class TestParseAndValidate:
             "required_context": [],
             "triage_rationale": "test",
         })
-        result = svc._parse_and_validate("EVT-CORRECT", raw)
-        assert result.event_id == "EVT-CORRECT"
+        with pytest.raises(ValueError, match="did not match"):
+            svc._parse_and_validate("EVT-CORRECT", raw)
 
 
 # ---------------------------------------------------------------------------

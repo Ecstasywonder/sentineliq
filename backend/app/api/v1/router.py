@@ -12,6 +12,7 @@ from app.api.v1.endpoints import events as events_router
 from app.api.v1.endpoints import feedback as feedback_router
 from app.api.v1.endpoints import health as health_router
 from app.api.v1.endpoints import risk_policies as risk_policies_router
+from app.api.v1.endpoints import simulator as simulator_router
 from app.api.v1.endpoints import tools as tools_router
 
 api_v1_router = APIRouter()
@@ -79,4 +80,11 @@ api_v1_router.include_router(
     risk_policies_router.router,
     prefix="/risk-policies",
     tags=["Risk Policies"],
+)
+
+# Simulator — deterministic, authenticated MVP event fixtures (Gate 4)
+api_v1_router.include_router(
+    simulator_router.router,
+    prefix="/simulator",
+    tags=["Simulator"],
 )

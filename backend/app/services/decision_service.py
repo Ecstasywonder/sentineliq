@@ -36,6 +36,7 @@ from app.schemas.decision import (
     DecisionResponse,
 )
 from app.security.dependencies import AuthenticatedUser
+from app.security.rbac import has_permission
 from app.services.event_lifecycle import validate_transition
 
 logger = structlog.get_logger(__name__)
@@ -96,6 +97,22 @@ class DecisionService:
                 f"Valid: {sorted(VALID_DECISIONS)}"
             )
 
+        required_permissions = {"events:decide"}
+        if decision_type == "escalate":
+            required_permissions.add("events:escalate")
+        if decision_type == "override" or is_override:
+            required_permissions.add("events:override")
+        missing_permissions = sorted(
+            permission
+            for permission in required_permissions
+            if not has_permission(actor.roles, permission)
+        )
+        if missing_permissions:
+            raise PermissionError(
+                f"Decision '{decision_type}' requires permissions: "
+                f"{', '.join(missing_permissions)}."
+            )
+
         # ---- 3. Guard: event must be in a decidable status ---------------
         if event.status not in _DECIDABLE_STATUSES:
             raise ValueError(
@@ -106,6 +123,7 @@ class DecisionService:
 
         # ---- 4. Determine target status and validate transition ----------
         target_status = DECISION_STATUS_MAP[decision_type]
+        is_override = is_override or decision_type == "override"
         validate_transition(event.status, target_status)  # raises InvalidTransitionError
 
         prior_status = event.status

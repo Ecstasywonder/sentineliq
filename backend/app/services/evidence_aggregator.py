@@ -20,7 +20,9 @@ from app.integrations.schedule import MockScheduleAdapter
 from app.integrations.work_order import MockWorkOrderAdapter
 from app.models.incident import IncidentHistory
 from app.models.integration import IntegrationHealth
+from app.models.event import SecurityEvent
 from app.models.security_rule import SecurityRule
+from app.schemas.knowledge import KnowledgeSearchResponse
 from app.schemas.tools import (
     AccessEventRecord,
     AccessEventsResponse,
@@ -39,6 +41,7 @@ from app.schemas.tools import (
     WorkOrderRecord,
     WorkOrdersResponse,
 )
+from app.services.knowledge_retrieval import KnowledgeRetrievalService
 
 logger = structlog.get_logger(__name__)
 
@@ -124,6 +127,18 @@ class EvidenceAggregator:
             errors,
         )
 
+        # ---- semantic / hybrid incident + policy knowledge ------------------
+        knowledge_resp = await self._safe(
+            "knowledge_search",
+            self._fetch_knowledge(
+                event_id,
+                location_id,
+                facility_id=facility_id,
+                limit=min(limit, 10),
+            ),
+            errors,
+        )
+
         # ---- integration health ---------------------------------------------
         health_resp = await self._safe(
             "integration_health",
@@ -139,6 +154,7 @@ class EvidenceAggregator:
             delivery=delivery_resp,
             location_policy=policy_resp,
             incident_history=incident_resp,
+            knowledge_search=knowledge_resp,
             integration_health=health_resp,
             errors=errors,
         )
@@ -351,6 +367,32 @@ class EvidenceAggregator:
                 record_count=len(records),
             ),
             records=records,
+        )
+
+    async def _fetch_knowledge(
+        self,
+        event_id: str,
+        location_id: str,
+        *,
+        facility_id: str | None,
+        limit: int,
+    ) -> KnowledgeSearchResponse:
+        event = await self._session.get(SecurityEvent, event_id)
+        query_parts = ["security event", location_id]
+        if event is not None:
+            query_parts.extend(
+                value
+                for value in (event.event_type, event.zone)
+                if isinstance(value, str) and value
+            )
+        service = KnowledgeRetrievalService(self._session)
+        return await service.search(
+            " ".join(query_parts),
+            facility_id=facility_id,
+            location_id=location_id,
+            include_incidents=True,
+            include_policies=True,
+            limit=limit,
         )
 
     # ------------------------------------------------------------------

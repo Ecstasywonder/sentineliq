@@ -1,0 +1,7 @@
+# Opt-in development override.  Keep this separate from the default Compose
+# file so production-like runs never execute uncommitted host source code.
+services:
+  backend:
+    volumes:
+      - ../../backend:/app
+      - media_data:/app/media

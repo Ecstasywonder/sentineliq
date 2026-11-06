@@ -31,6 +31,7 @@ from app.schemas.decision import (
 )
 from app.schemas.events import ErrorDetail
 from app.security.dependencies import AuthenticatedUser, require_permission
+from app.security.rbac import has_permission
 from app.services.decision_service import DecisionService
 from app.services.event_lifecycle import InvalidTransitionError
 
@@ -93,6 +94,25 @@ async def record_decision(
             ).model_dump(),
         )
 
+    required_permissions: set[str] = set()
+    if body.decision == "escalate":
+        required_permissions.add("events:escalate")
+    if body.decision == "override" or body.is_override:
+        required_permissions.add("events:override")
+    missing_permissions = sorted(
+        permission
+        for permission in required_permissions
+        if not has_permission(actor.roles, permission)
+    )
+    if missing_permissions:
+        raise HTTPException(
+            status_code=403,
+            detail=ErrorDetail(
+                code="FORBIDDEN",
+                message=f"Missing required permission(s): {', '.join(missing_permissions)}.",
+            ).model_dump(),
+        )
+
     try:
         service = DecisionService(session)
         result = await service.record(
@@ -103,6 +123,11 @@ async def record_decision(
             is_override=body.is_override,
             actor=actor,
         )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=ErrorDetail(code="FORBIDDEN", message=str(exc)).model_dump(),
+        ) from exc
     except ValueError as exc:
         msg = str(exc)
         status_code = 404 if "not found" in msg.lower() else 409

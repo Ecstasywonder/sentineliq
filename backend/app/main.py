@@ -24,6 +24,12 @@ from app.api.v1.router import api_v1_router
 from app.config import get_settings
 from app.db.session import check_db_connection, engine
 from app.logging_config import configure_logging
+from app.security.rate_limit import (
+    SlidingWindowRateLimiter,
+    request_identity,
+    request_peer_identity,
+)
+from app.security.request_limits import RequestBodyLimitMiddleware
 
 settings = get_settings()
 configure_logging()
@@ -72,6 +78,75 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_size=settings.max_request_body_bytes,
+    )
+
+    # -----------------------------------------------------------------------
+    # Application rate limiting
+    # -----------------------------------------------------------------------
+    limiter = SlidingWindowRateLimiter()
+    app.state.rate_limiter = limiter
+
+    @app.middleware("http")
+    async def rate_limiting(request: Request, call_next: object) -> Response:
+        if not settings.enable_rate_limiting or not request.url.path.startswith("/api/v1"):
+            return await call_next(request)  # type: ignore[arg-type]
+
+        identity = request_identity(request)
+        checks = [("api", identity, settings.rate_limit_api_per_minute)]
+        if request.method == "POST" and request.url.path == "/api/v1/events":
+            checks.append(
+                ("event_ingestion", identity, settings.rate_limit_events_per_minute)
+            )
+        if request.method == "POST" and request.url.path in {
+            "/api/v1/auth/token",
+            "/api/v1/auth/refresh",
+        }:
+            # Never let an optional bearer header shift login/refresh attempts
+            # into another principal's bucket.
+            checks.append(
+                (
+                    "authentication",
+                    request_peer_identity(request),
+                    settings.rate_limit_auth_per_minute,
+                )
+            )
+
+        tightest = None
+        for scope, scope_identity, limit in checks:
+            decision = await limiter.check(scope, scope_identity, limit)
+            if not decision.allowed:
+                logger.warning(
+                    "http.rate_limited",
+                    scope=scope,
+                    peer=request.client.host if request.client else "unknown",
+                    path=request.url.path,
+                )
+                return JSONResponse(
+                    status_code=429,
+                    headers={
+                        "Retry-After": str(decision.retry_after),
+                        "X-RateLimit-Limit": str(decision.limit),
+                        "X-RateLimit-Remaining": "0",
+                    },
+                    content={
+                        "detail": {
+                            "code": "RATE_LIMITED",
+                            "message": "Too many requests. Retry after the indicated delay.",
+                        }
+                    },
+                )
+            if tightest is None or decision.remaining < tightest.remaining:
+                tightest = decision
+
+        response: Response = await call_next(request)  # type: ignore[arg-type]
+        if tightest is not None:
+            response.headers["X-RateLimit-Limit"] = str(tightest.limit)
+            response.headers["X-RateLimit-Remaining"] = str(tightest.remaining)
+        return response
 
     # -----------------------------------------------------------------------
     # Security headers middleware

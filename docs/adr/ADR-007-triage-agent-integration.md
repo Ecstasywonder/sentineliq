@@ -3,7 +3,7 @@
 **Status:** Accepted  
 **Date:** 2026-11-05  
 **Author:** IBM Bob (Principal Architect)  
-**Gate:** 14
+**Historical gate:** 14 — Triage Agent (**Master Build Prompt Gate 11**)
 
 ---
 

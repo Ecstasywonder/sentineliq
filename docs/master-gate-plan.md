@@ -4,7 +4,7 @@
 **Version:** 1.0  
 **Date:** 2026-11-03  
 **Author:** IBM Bob (Principal Architect)  
-**Source of Truth:** Master Build Prompt + session progress
+**Source of Truth:** [Master Build Prompt](master-build-prompt.md) + session progress
 
 ---
 
@@ -16,55 +16,97 @@ Gates are executed in order. No gate is considered complete until:
 2. `ruff check` passes clean
 3. `pytest` passes 100% with no regressions
 
+The numbered sequence in the Master Build Prompt is canonical. Older implementation
+reports and the original roadmap used a different numbering scheme; they are retained
+as historical records and are cross-referenced below. Never infer the next gate from
+an older report's gate number.
+
 ---
 
 ## Gate Status
 
-| Gate | Name | Status | Report |
-|------|------|--------|--------|
-| **0** | Environment & Source-of-Truth Validation | ✅ Complete | `docs/gate-0-environment-report.md` |
-| **1** | BRD, SOP & Architecture Specification | ✅ Complete | Embedded in `docs/sentinel-brd.md`, `docs/sentinel-sop.md`, `docs/architecture.md` |
-| **2** | Docker Compose, Dockerfiles & Bootstrap | ✅ Complete | `docs/deployment.md` |
-| **3** | Data Models & Alembic Migration | ✅ Complete | 26 tables live in PostgreSQL |
-| **4** | Deterministic Risk Engine & Confidence Engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
-| **5** | Event Ingestion API | ✅ Complete | `docs/gate-5-event-ingestion-api.md` |
-| **6** | RBAC & Authentication | ✅ Complete | `docs/gate-6-rbac-auth.md` |
-| **7** | Evidence Retrieval API (Context Tools) | ✅ Complete | `docs/gate-7-evidence-retrieval.md` |
-| **8** | Evidence Aggregation Service | ✅ Complete | `docs/gate-8-assessment-api.md` |
-| **9** | Risk Assessment API | ✅ Complete | `docs/gate-9-risk-assessment-api.md` |
-| **10** | Operator Decision API | ✅ Complete | `docs/gate-10-operator-decision-api.md` |
-| **11** | Escalation API | ✅ Complete | `docs/gate-11-escalation-api.md` |
-| **12** | Audit Trail API | ✅ Complete | `docs/gate-12-audit-trail-api.md` |
-| **13** | Feedback API | ✅ Complete | `docs/gate-13-feedback-api.md` |
-| **14** | Triage Agent (watsonx Orchestrate) | ✅ Complete | `docs/gate-14-triage-agent.md` |
-| **15** | Context Agent (watsonx Orchestrate) | ✅ Complete | `docs/gate-15-context-agent.md` |
-| **16** | Explanation Agent (watsonx Orchestrate) | 🔲 Next | — |
-| **17** | Sentinel Coordinator (watsonx Orchestrate) | 🔲 Pending | — |
-| **18** | Agent Tool Schemas (OpenAPI → Orchestrate) | 🔲 Pending | — |
-| **19** | End-to-End Assessment Flow (Agents + Backend) | 🔲 Pending | — |
-| **20** | Seed Data & Demo Scenarios | 🔲 Pending | — |
-| **21** | Frontend Scaffold (React + Vite + TypeScript) | 🔲 Pending | — |
-| **22** | Event Queue UI | 🔲 Pending | — |
-| **23** | Event Detail & Evidence Panel UI | 🔲 Pending | — |
-| **24** | Decision Controls UI | 🔲 Pending | — |
-| **25** | Escalation UI | 🔲 Pending | — |
-| **26** | Audit Trail UI | 🔲 Pending | — |
-| **27** | Admin UI (Risk Policy, Users) | 🔲 Pending | — |
-| **28** | Integration Health Dashboard UI | 🔲 Pending | — |
-| **29** | Agent Evaluation Framework | 🔲 Pending | — |
-| **30** | Evaluation Dataset (5 BRD scenarios) | 🔲 Pending | — |
-| **31** | CI Pipeline (GitHub Actions) | 🔲 Pending | — |
-| **32** | Full Stack Docker Compose (all services up) | 🔲 Pending | — |
-| **33** | Performance & Load Testing | 🔲 Pending | — |
-| **34** | Security Hardening (SSO/OIDC, TLS, secrets) | 🔲 Pending | — |
-| **35** | Production Deployment Package | 🔲 Pending | — |
+| Gate | Name | Status | Evidence |
+|------|------|--------|----------|
+| **0** | Environment and source-of-truth validation | ✅ Complete | `docs/gate-0-environment-report.md` |
+| **1** | BRD, SOP, and architecture specification | ✅ Complete | `docs/sentinel-brd.md`, `docs/sentinel-sop.md`, `docs/architecture.md` |
+| **2** | Repository scaffold and developer foundation | ⚠️ Partial — CI workflow has no job results; format and frontend lint checks fail | `docs/deployment.md`, `.github/workflows/ci.yml` |
+| **3** | Database and domain model | ✅ Complete | Alembic migration and model tests |
+| **4** | Security-event simulator | 🔲 Not started — scenario directories are placeholders | `data/scenarios/` |
+| **5** | Event ingestion and event queue backend | ✅ Complete | `docs/gate-5-event-ingestion-api.md` |
+| **6** | Evidence-source services | ✅ Complete | `docs/gate-7-evidence-retrieval.md` |
+| **7** | Orchestrate tool layer | ⚠️ Partial — schemas exist; tenant import and live validation are outstanding | Legacy Gate 14/15 reports |
+| **8** | Incident history and knowledge retrieval | ⚠️ Partial — incident-history tools exist; semantic/hybrid retrieval and cited knowledge retrieval are not verified | `docs/gate-7-evidence-retrieval.md` |
+| **9** | Deterministic risk engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
+| **10** | Confidence engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
+| **11** | Triage Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-14-triage-agent.md` (legacy Gate 14) |
+| **12** | Context Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-15-context-agent.md` (legacy Gate 15) |
+| **13** | Explanation Agent | 🟡 In progress — 427 backend tests pass on EC2; not merged; live provider integration unverified | `backend/tests/test_explanation_agent.py` |
+| **14** | Coordinator and end-to-end agent workflow | ⚠️ Partial — assessment pipeline invokes agents and deterministic engines; complete workflow-state persistence is not verified | `backend/app/services/assessment_service.py` |
+| **15** | Human-review workflow | ✅ Complete — decision, escalation, audit, and feedback APIs are implemented and tested | Legacy Gates 10–13 reports |
+| **16** | Operator dashboard foundation | ⚠️ Partial — frontend shell exists; authentication, event queue, filters, and navigation remain | `frontend/src/App.tsx` |
+| **17** | Event decision interface | 🔲 Not started | — |
+| **18** | Audit and history interface | 🔲 Not started | — |
+| **19** | RBAC and administrative controls | ⚠️ Partial — backend RBAC exists; administrative UI and complete authorization validation remain | `docs/gate-6-rbac-auth.md` |
+| **20** | Integration and failure-state hardening | ⚠️ Partial — fallbacks and isolated source errors exist; full failure matrix is outstanding | Legacy Gates 14/15 reports |
+| **21** | Evaluation framework | 🔲 Not started | `evaluations/` placeholders |
+| **22** | Security and adversarial testing | ⚠️ Partial — threat model and focused prompt-injection tests exist; full security test gate remains | `docs/threat-model.md` |
+| **23** | MVP usability and operator validation readiness | 🔲 Not started | — |
+| **24** | MVP release candidate | 🔲 Not started | — |
+| **25** | MVP demonstration and freeze | 🔲 Not started | — |
+| **26** | Production architecture ADRs | 🔲 Not started | — |
+| **27** | Provider adapter framework | 🔲 Not started | — |
+| **28** | Production event pipeline | 🔲 Not started | — |
+| **29** | Real VMS integration readiness | 🔲 Not started | — |
+| **30** | Enterprise access-control integration readiness | 🔲 Not started | — |
+| **31** | Enterprise scheduling and operational integration | 🔲 Not started | — |
+| **32** | Enterprise policy and knowledge architecture | 🔲 Not started | — |
+| **33** | Multi-site architecture | 🔲 Not started | — |
+| **34** | Production identity and access management | 🔲 Not started | — |
+| **35** | Production secrets and connection management | 🔲 Not started | — |
+| **36** | Production audit architecture | 🔲 Not started | — |
+| **37** | Production observability and AgentOps | 🔲 Not started | — |
+| **38** | Production governance | 🔲 Not started | — |
+| **39** | Scale and load testing | 🔲 Not started | — |
+| **40** | Reliability engineering | 🔲 Not started | — |
+| **41** | Backup and disaster recovery | 🔲 Not started | — |
+| **42** | Production security assessment | 🔲 Not started | — |
+| **43** | Privacy and retention controls | 🔲 Not started | — |
+| **44** | Production evaluation suite | 🔲 Not started | — |
+| **45** | Pilot deployment readiness | 🔲 Not started | — |
+| **46** | Production pilot | 🔲 Not started | — |
+| **47** | Pilot evaluation and refinement | 🔲 Not started | — |
+| **48** | Multi-site production readiness | 🔲 Not started | — |
+
+### Historical gate-number crosswalk
+
+The original implementation roadmap used different numbers. Preserve those labels
+in existing report filenames, but use the Master Build Prompt numbers for all new
+work and status decisions.
+
+| Historical implementation label | Canonical Master Build Prompt gate |
+|----------------------------------|------------------------------------|
+| Gate 14 — Triage Agent | Gate 11 — Triage Agent |
+| Gate 15 — Context Agent | Gate 12 — Context Agent |
+| Gate 16 — Explanation Agent | Gate 13 — Explanation Agent |
+| Gate 17 — Sentinel Coordinator | Gate 14 — Coordinator and end-to-end workflow |
+| Gates 10–13 — decision, escalation, audit, feedback APIs | Gate 15 — Human-review workflow (backend portion) |
+| Gates 21–28 — frontend roadmap | Gates 16–19 — dashboard, decision, audit/history, and admin interfaces |
+
+The existing backend gates 0–13 are historical delivery groupings, not a
+one-to-one renumbering of Master Build Prompt gates 0–10. Their artifacts remain
+valid evidence where they satisfy a canonical gate's acceptance criteria.
 
 ---
 
-## Completed Gates — Key Artifacts
+## Historical delivery record — original roadmap numbering
+
+The following implementation notes retain the numbering used when those changes
+were first delivered. Use the canonical status table and crosswalk above for current
+gate sequencing.
 
 ### Gate 0 — Environment Validation
-- EC2: Ubuntu, Python 3.14, Node 20, Docker 29, uv 0.13 — all confirmed
+- EC2: Ubuntu, Python 3.14.4, Node 20.20.2, Docker 29.9.2 confirmed; `uv` was
+  unavailable during the latest environment check
 - Git remote: `https://github.com/Ecstasywonder/sentineliq.git`
 - All work runs on EC2; local machine is source-of-truth for files
 
@@ -196,7 +238,7 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 14 — Triage Agent / watsonx Orchestrate ✅
+## Historical Gate 14 — Triage Agent (Master Build Prompt Gate 11)
 
 **Deliverables:**
 - `agents/triage/agent.yaml` — Orchestrate agent definition (model, tools, instructions, output schema)
@@ -212,7 +254,10 @@ Gates are executed in order. No gate is considered complete until:
 
 ---
 
-## Gate 15 — Context Agent / watsonx Orchestrate (Next)
+## Historical Gate 15 — Context Agent (Master Build Prompt Gate 12)
+
+**Status:** Implemented and merged in PR #1. Orchestrate tenant import and live
+integration validation remain outstanding.
 
 **Scope:**
 - Context Agent coordinates evidence retrieval using required_context from Triage Agent
@@ -239,15 +284,27 @@ Gates are executed in order. No gate is considered complete until:
 
 ## Test Suite Progress
 
-| Gate | Tests Added | Cumulative | Coverage |
-|------|-------------|-----------|----------|
-| 3 | 16 (model tests) | 16 | — |
-| 4 | 58 (risk + confidence) | 74 | 88% |
-| 5 | 39 (events API + lifecycle) | 113 | 90% |
-| 6 | 31 (auth + RBAC) | 144 | 90% |
-| 7 | ~50 (tools API + aggregator) | ~194 | TBC |
-| 8 | 14 (assessment API round-trip) | ~208 | TBC |
-| 9 | 30 (retrieval + factors + risk policies) | ~238 | TBC |
-| 10 | 32 (decision API — all 6 types, audit trail, errors) | ~270 | TBC |
-| 11 | 34 (escalation lifecycle, auto-create, audit) | ~304 | 93% |
-| 14 | 46 (triage service, parse+validate, HTTP mock, integration) | ~380 | TBC |
+| Validation | Result | Environment / notes |
+|------------|--------|----------------------|
+| Backend test suite | 397 passed | EC2, Python 3.14.4, before documentation-only merge commit |
+| Backend coverage | 91.57% | EC2; temporary XML output, tracked report preserved |
+| `ruff check app/ tests/` | Passed | EC2 |
+| `ruff format --check app/ tests/` | Failed | 31 files would be reformatted; includes six Gate 14/15 Python files |
+| GitHub Actions | Failed without creating jobs | No job logs were available; no branch protection is configured |
+
+This validation applies to the Gate 14/15 implementation before the merge commit;
+the current Gate 13 validation is recorded below. Neither snapshot alone declares
+all related gates complete.
+
+### Gate 13 validation — unmerged working branch
+
+- EC2 full backend suite: **427 passed** on isolated worktree `gate-13-explanation-agent`,
+  based on `12525c2`; coverage collection was disabled for this run.
+- Ruff check passes for the changed Gate 13 Python files. The full backend check still
+  reports six existing findings in untouched integration/evidence files.
+- Formatting passes for the new Explanation Agent Python files. The broader repository
+  formatter check remains unresolved; `assessment_service.py` also has pre-existing
+  formatting differences outside this gate's changes.
+- Provider calls were mocked or used deterministic fallback. Live watsonx integration
+  has not been validated because EC2 Orchestrate credentials are not configured.
+- The work remains uncommitted and unmerged; Gate 13 is still in progress.

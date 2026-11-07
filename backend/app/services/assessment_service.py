@@ -1,5 +1,5 @@
 """
-AssessmentService — Gate 8 / Gate 14 / Gate 15.
+AssessmentService — Gate 8 / Gate 14 / Gate 15 / Master Build Prompt Gate 13.
 
 Orchestrates:
   0. TriageService.run()          — classify event + identify required context (Gate 14)
@@ -8,13 +8,13 @@ Orchestrates:
   2. _build_signals()             — derive FactorSignals from evidence
   3. RiskEngine.assess()          — deterministic risk score (ADR-003)
   4. ConfidenceEngine.assess()    — independent confidence score (ADR-004)
+  4b. ExplanationService.run()    — grounded operator narrative (Master Build Prompt Gate 13)
   5. Persist RiskAssessment + ConfidenceAssessment rows
   6. Denormalise risk/confidence back onto SecurityEvent
   7. Transition event: normalised → assessing → awaiting_review
 
-Triage runs BEFORE the deterministic pipeline.  If Orchestrate is unavailable,
-TriageService automatically falls back to deterministic classification.
-The event is NEVER lost due to a triage failure (Gate 14) or context failure (Gate 15).
+The event is NEVER lost due to a triage (legacy Gate 14), context (legacy Gate 15),
+or explanation (Master Build Prompt Gate 13) failure.
 """
 
 from __future__ import annotations
@@ -33,11 +33,13 @@ from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
 from app.schemas.context import ContextResultDetail
+from app.schemas.explanation import ExplanationResultDetail
 from app.schemas.triage import TriageResultDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
 from app.services.context_service import ContextService
 from app.services.event_lifecycle import validate_transition
 from app.services.evidence_aggregator import EvidenceAggregator
+from app.services.explanation_service import ExplanationService
 from app.services.risk_engine import FactorSignal, RiskEngine
 from app.services.triage_service import TriageService
 
@@ -178,6 +180,37 @@ class AssessmentService:
             tool_retrieval_errors=tool_errors,
         )
 
+        # ---- 6b. Explanation Agent — grounded operator narrative (Gate 13) --
+        explanation_svc = ExplanationService(self._session)
+        risk_factors_dicts = [
+            {
+                "factor_id": f.factor_id,
+                "label": f.label,
+                "triggered": f.triggered,
+                "contribution": f.contribution,
+            }
+            for f in risk_result.factors
+        ]
+        explanation_result = await explanation_svc.run(
+            event_id=event_id,
+            event_metadata={
+                "event_type": event.event_type,
+                "event_timestamp": str(event.event_timestamp),
+                "location_id": event.location_id,
+                "facility_id": event.facility_id,
+                "zone": event.zone,
+            },
+            triage_result=triage_result,
+            context_result=context_result,
+            risk_score=risk_result.risk_score,
+            risk_level=risk_result.risk_level,
+            risk_factors=risk_factors_dicts,
+            confidence_score=conf_result.confidence_score,
+            confidence_level=conf_result.confidence_level,
+            evidence_errors=evidence.errors,
+            evidence=evidence,
+        )
+
         # ---- 7. Persist assessment rows -------------------------------------
         assessed_at = datetime.now(UTC).isoformat()
         await self._persist_assessments(
@@ -242,11 +275,27 @@ class AssessmentService:
             agent_run_id=context_result.agent_run_id,
         )
 
+        explanation_detail = ExplanationResultDetail(
+            summary=explanation_result.summary,
+            risk_level=explanation_result.risk_level,
+            risk_score=explanation_result.risk_score,
+            confidence_score=explanation_result.confidence_score,
+            why=explanation_result.why,
+            missing_evidence=explanation_result.missing_evidence,
+            limitations=explanation_result.limitations,
+            recommended_action=explanation_result.recommended_action,
+            has_missing_evidence=explanation_result.has_missing_evidence,
+            has_limitations=explanation_result.has_limitations,
+            source=explanation_result.source,
+            agent_run_id=explanation_result.agent_run_id,
+        )
+
         return AssessmentResponse(
             event_id=event_id,
             event_status=event.status,
             triage=triage_detail,
             context=context_detail,
+            explanation=explanation_detail,
             risk_score=risk_result.risk_score,
             risk_level=risk_result.risk_level,
             risk_policy_version=risk_result.policy_version,

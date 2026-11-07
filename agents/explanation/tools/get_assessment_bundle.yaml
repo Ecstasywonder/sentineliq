@@ -1,0 +1,75 @@
+openapi: "3.1.0"
+info:
+  title: Get Assessment Bundle
+  version: "1.0"
+  description: >
+    Retrieve the full assessment bundle for a security event — including
+    triage result, context result, risk score, risk factors, and confidence
+    score. The Explanation Agent uses this to ground its narrative in
+    verified, deterministic data rather than relying solely on the input
+    prompt.
+
+    Read-only. The Explanation Agent MUST NOT call any operational or
+    write-capable tools (§33).
+
+paths:
+  /tools/assessment-bundle:
+    get:
+      operationId: get_assessment_bundle
+      summary: Retrieve the full assessment bundle for a security event.
+      parameters:
+        - name: event_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: SentinelIQ event UUID.
+      responses:
+        "200":
+          description: Full assessment bundle for the event.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event_id:
+                    type: string
+                  event_type:
+                    type: string
+                  event_timestamp:
+                    type: string
+                    format: date-time
+                  location_id:
+                    type: string
+                  risk_score:
+                    type: number
+                    format: float
+                  risk_level:
+                    type: string
+                    enum: [low, medium, high, critical]
+                  confidence_score:
+                    type: number
+                    format: float
+                  confidence_level:
+                    type: string
+                  risk_factors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        factor_id:
+                          type: string
+                        label:
+                          type: string
+                        triggered:
+                          type: boolean
+                        contribution:
+                          type: number
+                  triage:
+                    type: object
+                    nullable: true
+                  context:
+                    type: object
+                    nullable: true
+        "404":
+          description: Event or assessment not found.

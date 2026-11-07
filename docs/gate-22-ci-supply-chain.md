@@ -1,12 +1,12 @@
 # Gate 22 — Security and adversarial testing
 
 Gate 22 makes the CI Gate a blocking supply-chain control and verifies the
-adversarial testing requirements from master-build-prompt §38.  The `CI Gate
+adversarial testing requirements from Master Build Prompt Gate 22. The `CI Gate
 (required for merge)` status must remain a required branch-protection check.
 The active `main-ci-gate` repository ruleset requires pull requests and this
 status check on `main`.
 
-## Candidate validation evidence
+## Final validation evidence
 
 - EC2 isolated backend: Ruff check and format passed; **782 tests passed** with
   **90.82% coverage** (above the 85% threshold).
@@ -18,7 +18,35 @@ status check on `main`.
 - The final candidate images scanned with Trivy had **0 high/critical
   findings**; Gitleaks scans of full history and working tree had **0
   findings**.
-- GitHub CI for the final commit/PR remains required before Gate 22 is complete.
+- Final candidate commit `306a7cd` passed every blocking job in both the
+  [push run](https://github.com/Ecstasywonder/sentineliq/actions/runs/42424358453)
+  and the
+  [pull-request run](https://github.com/Ecstasywonder/sentineliq/actions/runs/42424362147),
+  including `CI Gate (required for merge)`.
+- [PR #2](https://github.com/Ecstasywonder/sentineliq/pull/2) merged to `main`
+  as commit `4a9d8c02f76eeb8bb0d92a08c8d03f514230891d` on 2026-11-08
+  (Africa/Lagos).
+
+## GitHub Actions failure analysis
+
+- Initial runs `42422533437` and `42422537402` failed the Python audit with
+  eight advisories across two packages. The JSON report stayed in runner
+  temporary storage and was not uploaded; EC2 reproduction identified the
+  affected toolchain packages as `uv==0.6.3` and `setuptools==79.0.1`.
+- The initial Trivy jobs stopped before any image scan because the workflow
+  referenced nonexistent action tag `aquasecurity/trivy-action@0.28.0`.
+  After adding the `v` prefix, runs `42424184820` and `42424188963` exposed a
+  second upstream metadata failure: that release referenced unavailable
+  `aquasecurity/setup-trivy@v0.2.1`. Neither failure produced a Trivy finding or
+  scan artifact.
+- The initial PR-context Gitleaks job stopped before scanning with a GitHub API
+  `403` while reading PR commits. The job now has only `contents: read` and
+  `pull-requests: read`, with comments disabled. Available
+  `gitleaks-results.sarif` artifacts contain zero results; the failed
+  pre-scan PR job produced no artifact.
+- The final runs passed strict Python and npm audits, Gitleaks, and both Trivy
+  production-image scans. The aggregate required gate passed in both event
+  contexts.
 
 ## Blocking checks
 

@@ -50,7 +50,7 @@ an older report's gate number.
 | **19** | RBAC and administrative controls | ✅ Complete — admin API (7 routes), AdminPage, roles reference, 34 backend + 5 frontend tests, 608 backend tests pass, 90% coverage | `docs/gate-19-rbac-admin.md`, `backend/app/api/v1/endpoints/admin.py` |
 | **20** | Integration and failure-state hardening | ✅ Complete — 30 tests covering 9 failure scenarios; all architecture invariants verified; 638 backend + 39 frontend tests passing | `docs/gate-20-failure-hardening.md` |
 | **21** | Evaluation framework | ✅ Complete — 30-case dataset (all 26 MBP §35 categories), scorer, 106 pipeline + 15 unit tests, baseline report | `docs/gate-21-evaluation-framework.md` |
-| **22** | Security and adversarial testing | 🟡 Candidate complete on isolated EC2 — threat-model review recorded; adversarial tests and dependency/secret/image scans passed. Strict completion awaits commit/push through PR and required GitHub CI | `docs/threat-model.md`, `docs/gate-22-ci-supply-chain.md` |
+| **22** | Security and adversarial testing | ✅ Complete — 782 backend tests and adversarial controls validated on EC2; strict dependency/secret/image checks and the required CI Gate passed; PR #2 merged as `4a9d8c0` | `docs/threat-model.md`, `docs/gate-22-ci-supply-chain.md` |
 | **23** | MVP usability and operator validation readiness | 🔲 Not started | — |
 | **24** | MVP release candidate | 🔲 Not started | — |
 | **25** | MVP demonstration and freeze | 🔲 Not started | — |

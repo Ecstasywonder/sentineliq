@@ -47,22 +47,14 @@ gate reports retain their original labels; the
 | 17 | Event decision interface | ✅ Complete |
 | 18 | Audit and history interface | ✅ Complete |
 | 19 | RBAC and administrative controls | ✅ Complete |
-| 20–48 | Remaining MVP and production gates | 🔲 Pending |
+| 20 | Integration and failure-state hardening | ✅ Complete |
+| 21–48 | Remaining MVP and production gates | 🔲 Pending |
 
-**Latest EC2 candidate validation:** 537 backend tests passed at 90.39% coverage
-under the production-floor Python 3.11 runtime with greenlet-aware tracing;
-Ruff check and format passed across 114 Python files. Frontend format, type
-check, lint, 14 unit tests, production build, and same-origin container proxy
-smoke test passed. Production dependency audit found zero
-vulnerabilities; six moderate dev-only transitive findings remain in the full
-audit. Fresh and legacy-stamp PostgreSQL migration paths reached Alembic head
-`0004` with 29 public tables. Clean container builds also verified that runtime
-`.env` and key files are excluded from image layers. See
-[Gate 14/16 completion evidence](docs/gate-14-16-completion.md).
+**Latest EC2 validation (Gate 20):** 638 backend tests passed (30.00s), 39 frontend tests passed;
+ruff check + format clean across 122 Python files; production Vite build succeeded.
+See [Gate 20 report](docs/gate-20-failure-hardening.md).
 
-**Current focus:** close live Orchestrate Coordinator import/invocation evidence
-for Gate 14, then pass the final CI gate and merge the reviewed candidate before
-marking strict gate completion.
+**Current focus:** Gate 21 — Evaluation framework.
 
 ---
 

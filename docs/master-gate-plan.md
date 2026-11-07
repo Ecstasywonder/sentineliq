@@ -48,7 +48,7 @@ an older report's gate number.
 | **17** | Event decision interface | ✅ Complete — AgentPanel (triage/context), CoordinatorPanel (on-demand review), EscalationPanel, DecisionHistoryPanel, extended metadata; 26 frontend tests pass on EC2 | `frontend/src/App.tsx`, `docs/gate-17-frontend.md` |
 | **18** | Audit and history interface | ✅ Complete — `EventAuditPanel`, `EscalationDetailPanel`, `RiskPolicyPanel`, `AuditPage`, `DecisionHistoryPanel`, 13 unit tests, audit CSS | `docs/gate-18-audit-history.md`, `frontend/src/App.tsx` |
 | **19** | RBAC and administrative controls | ✅ Complete — admin API (7 routes), AdminPage, roles reference, 34 backend + 5 frontend tests, 608 backend tests pass, 90% coverage | `docs/gate-19-rbac-admin.md`, `backend/app/api/v1/endpoints/admin.py` |
-| **20** | Integration and failure-state hardening | ⚠️ Partial — fallbacks and isolated source errors exist; full failure matrix is outstanding | Legacy Gates 14/15 reports |
+| **20** | Integration and failure-state hardening | ✅ Complete — 30 tests covering 9 failure scenarios; all architecture invariants verified; 638 backend + 39 frontend tests passing | `docs/gate-20-failure-hardening.md` |
 | **21** | Evaluation framework | 🔲 Not started | `evaluations/` placeholders |
 | **22** | Security and adversarial testing | ⚠️ Partial — threat model and focused prompt-injection tests exist; full security test gate remains | `docs/threat-model.md` |
 | **23** | MVP usability and operator validation readiness | 🔲 Not started | — |

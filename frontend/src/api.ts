@@ -462,3 +462,89 @@ export const getEventEscalationDetail = (eventId: string) =>
   request<EscalationDetail>(
     `/events/${encodeURIComponent(eventId)}/escalation`,
   );
+
+// ---------------------------------------------------------------------------
+// Gate 19 — Admin types and API functions
+// ---------------------------------------------------------------------------
+
+export interface UserRoleSummary {
+  role: string;
+  granted_by: string | null;
+}
+
+export interface AdminUserDetail {
+  id: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  is_verified: boolean;
+  roles: UserRoleSummary[];
+  created_at: string;
+}
+
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  roles: string[];
+  created_at: string;
+}
+
+export interface AdminUserList {
+  items: AdminUserListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export interface RoleDescription {
+  name: string;
+  description: string;
+  permissions: string[];
+}
+
+export interface RolesResponse {
+  roles: RoleDescription[];
+}
+
+export const getAdminUsers = (page = 1) =>
+  request<AdminUserList>(`/admin/users?page=${page}&page_size=50`);
+
+export const getAdminUser = (userId: string) =>
+  request<AdminUserDetail>(`/admin/users/${encodeURIComponent(userId)}`);
+
+export const createAdminUser = (
+  email: string,
+  full_name: string,
+  password: string,
+  roles: string[],
+) =>
+  request<AdminUserDetail>("/admin/users", {
+    method: "POST",
+    body: JSON.stringify({ email, full_name, password, roles }),
+  });
+
+export const updateAdminUser = (
+  userId: string,
+  patch: { full_name?: string; is_active?: boolean },
+) =>
+  request<AdminUserDetail>(`/admin/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+export const assignRole = (userId: string, role: string) =>
+  request<AdminUserDetail>(`/admin/users/${encodeURIComponent(userId)}/roles`, {
+    method: "POST",
+    body: JSON.stringify({ role }),
+  });
+
+export const removeRole = (userId: string, role: string) =>
+  request<AdminUserDetail>(
+    `/admin/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`,
+    { method: "DELETE" },
+  );
+
+export const getAdminRoles = () => request<RolesResponse>("/admin/roles");

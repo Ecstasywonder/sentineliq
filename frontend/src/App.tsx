@@ -8,6 +8,8 @@ import {
 import {
   ApiError,
   assessEvent,
+  getAdminRoles,
+  getAdminUsers,
   getAssessment,
   getCoordinatorReview,
   getDecisionHistory,
@@ -20,6 +22,8 @@ import {
   getRiskPolicies,
   getRiskPolicy,
   recordDecision,
+  updateAdminUser,
+  type AdminUserList,
   type Assessment,
   type AuditEntry,
   type AuditList,
@@ -29,6 +33,7 @@ import {
   type EscalationDetail,
   type RiskLevel,
   type RiskPolicyDetail,
+  type RolesResponse,
   type SecurityEvent,
 } from "./api";
 import { useAuth } from "./auth";
@@ -97,6 +102,8 @@ const auditRoles = new Set([
 ]);
 
 const policyRoles = new Set(["security_admin", "platform_admin"]);
+
+const adminRoles = new Set(["platform_admin"]);
 
 // ---------------------------------------------------------------------------
 // Gate 18 — Audit and history panels
@@ -1634,13 +1641,246 @@ function EventDetail({
 }
 
 // ---------------------------------------------------------------------------
+// Gate 19 — Administration page
+// ---------------------------------------------------------------------------
+
+function AdminPage(): React.JSX.Element {
+  // ── Users panel ──────────────────────────────────────────────────────────
+  const [users, setUsers] = useState<AdminUserList | null>(null);
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState("");
+
+  // ── Roles panel ───────────────────────────────────────────────────────────
+  const [roles, setRoles] = useState<RolesResponse | null>(null);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
+  const [rolesError, setRolesError] = useState("");
+
+  // ── Inline deactivate action ──────────────────────────────────────────────
+  const [actionError, setActionError] = useState("");
+
+  const loadUsers = useCallback(async (p: number) => {
+    setUsersLoading(true);
+    setUsersError("");
+    try {
+      const result = await getAdminUsers(p);
+      if (!result || !Array.isArray(result.items)) {
+        setUsersError("User list could not be loaded.");
+        return;
+      }
+      setUsers(result);
+      setUsersPage(p);
+    } catch (e) {
+      setUsersError(errorMessage(e, "User list could not be loaded."));
+    } finally {
+      setUsersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUsers(1);
+  }, [loadUsers]);
+
+  const loadRoles = async () => {
+    setRolesLoading(true);
+    setRolesError("");
+    try {
+      setRoles(await getAdminRoles());
+      setRolesLoaded(true);
+    } catch (e) {
+      setRolesError(errorMessage(e, "Role list could not be loaded."));
+    } finally {
+      setRolesLoading(false);
+    }
+  };
+
+  const toggleActive = async (userId: string, current: boolean) => {
+    setActionError("");
+    try {
+      await updateAdminUser(userId, { is_active: !current });
+      await loadUsers(usersPage);
+    } catch (e) {
+      setActionError(errorMessage(e, "Could not update user."));
+    }
+  };
+
+  return (
+    <section aria-labelledby="admin-page-title">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Administration</p>
+          <h1 id="admin-page-title">Users and roles</h1>
+          <p>Manage user accounts and role assignments.</p>
+        </div>
+      </div>
+
+      {/* ── Users ──────────────────────────────────────────────────────── */}
+      <section className="panel" aria-labelledby="admin-users-title">
+        <div className="section-heading">
+          <h2 id="admin-users-title">
+            Users
+            {users && <span className="admin-count"> ({users.total})</span>}
+          </h2>
+          <button
+            className="secondary"
+            onClick={() => void loadUsers(usersPage)}
+            disabled={usersLoading}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {usersLoading && (
+          <p className="loading" role="status">
+            Loading users…
+          </p>
+        )}
+        {usersError && (
+          <div className="error-panel" role="alert">
+            <p>{usersError}</p>
+            <button className="secondary" onClick={() => void loadUsers(usersPage)}>
+              Try again
+            </button>
+          </div>
+        )}
+        {actionError && (
+          <p className="error" role="alert">
+            {actionError}
+          </p>
+        )}
+
+        {users && users.items.length === 0 && !usersLoading && (
+          <p>No users found.</p>
+        )}
+
+        {users && users.items.length > 0 && (
+          <div className="table-wrap" aria-label="User list">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Roles</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.items.map((u) => (
+                  <tr key={u.id}>
+                    <td>{u.full_name}</td>
+                    <td>{u.email}</td>
+                    <td>
+                      <div className="role-pills">
+                        {u.roles.length > 0
+                          ? u.roles.map((r) => (
+                              <span key={r} className="audit-role">
+                                {humanize(r)}
+                              </span>
+                            ))
+                          : <span className="admin-muted">No roles</span>}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={u.is_active ? "admin-active" : "admin-inactive"}>
+                        {u.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className="secondary small"
+                        onClick={() => void toggleActive(u.id, u.is_active)}
+                      >
+                        {u.is_active ? "Deactivate" : "Reactivate"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {users && users.pages > 1 && !usersLoading && (
+          <nav className="pagination" aria-label="Users pages">
+            <button
+              className="secondary"
+              disabled={usersPage <= 1}
+              onClick={() => void loadUsers(usersPage - 1)}
+            >
+              Previous
+            </button>
+            <span aria-live="polite">
+              Page {usersPage} of {users.pages}
+            </span>
+            <button
+              className="secondary"
+              disabled={usersPage >= users.pages}
+              onClick={() => void loadUsers(usersPage + 1)}
+            >
+              Next
+            </button>
+          </nav>
+        )}
+      </section>
+
+      {/* ── Roles and permissions ───────────────────────────────────────── */}
+      <section className="panel" aria-labelledby="admin-roles-title">
+        <h2 id="admin-roles-title">Roles and permissions</h2>
+        <p>
+          Platform role definitions and their granted permissions. This is a
+          read-only reference — role definitions are managed through
+          configuration.
+        </p>
+
+        {!rolesLoaded && !rolesLoading && !rolesError && (
+          <button className="secondary" onClick={() => void loadRoles()}>
+            Load role definitions
+          </button>
+        )}
+        {rolesLoading && (
+          <p className="loading" role="status">
+            Loading roles…
+          </p>
+        )}
+        {rolesError && (
+          <p className="error" role="alert">
+            {rolesError}
+          </p>
+        )}
+        {roles && (
+          <ul className="admin-roles-list">
+            {roles.roles.map((r) => (
+              <li key={r.name} className="admin-role-entry">
+                <div className="admin-role-header">
+                  <span className="audit-role">{r.name}</span>
+                  <span className="admin-role-desc">{r.description}</span>
+                </div>
+                <ul className="admin-perm-list">
+                  {r.permissions.map((p) => (
+                    <li key={p}>
+                      <code>{p}</code>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App shell
 // ---------------------------------------------------------------------------
 
 export default function App(): React.JSX.Element {
   const { user, loading, signOut } = useAuth();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [page, setPage] = useState<"queue" | "audit">("queue");
+  const [page, setPage] = useState<"queue" | "audit" | "admin">("queue");
 
   if (loading) {
     return (
@@ -1657,6 +1897,7 @@ export default function App(): React.JSX.Element {
   }
 
   const canViewAudit = user.roles.some((r) => auditRoles.has(r));
+  const canViewAdmin = user.roles.some((r) => adminRoles.has(r));
 
   // Navigating to queue resets event selection
   const goQueue = () => {
@@ -1665,6 +1906,10 @@ export default function App(): React.JSX.Element {
   };
   const goAudit = () => {
     setPage("audit");
+    setSelectedEventId(null);
+  };
+  const goAdmin = () => {
+    setPage("admin");
     setSelectedEventId(null);
   };
 
@@ -1697,6 +1942,16 @@ export default function App(): React.JSX.Element {
                 Audit trail
               </button>
             )}
+            {canViewAdmin && (
+              <button
+                className="nav-link"
+                type="button"
+                aria-current={page === "admin" ? "page" : undefined}
+                onClick={goAdmin}
+              >
+                Admin
+              </button>
+            )}
             {selectedEventId && <span aria-current="page">Event detail</span>}
           </nav>
           <span>{user.full_name}</span>
@@ -1708,6 +1963,8 @@ export default function App(): React.JSX.Element {
 
       {page === "audit" ? (
         <AuditPage />
+      ) : page === "admin" ? (
+        <AdminPage />
       ) : selectedEventId ? (
         <EventDetail
           eventId={selectedEventId}

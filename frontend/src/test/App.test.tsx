@@ -1090,4 +1090,163 @@ describe("App", () => {
     await screen.findByText("Decision timeline");
     expect(screen.queryByText("Risk-policy reference")).not.toBeInTheDocument();
   });
+
+  // ── Gate 19: Admin page ─────────────────────────────────────────────────
+
+  const adminLoginMocks = () => [
+    new Response(
+      JSON.stringify({
+        access_token: "access",
+        refresh_token: "refresh",
+        expires_in: 900,
+      }),
+      { status: 200 },
+    ),
+    new Response(
+      JSON.stringify({
+        id: "u4",
+        email: "admin@example.com",
+        full_name: "Platform Admin",
+        roles: ["platform_admin"],
+        is_active: true,
+      }),
+      { status: 200 },
+    ),
+  ];
+
+  const makeAdminUserList = (items: object[] = []) =>
+    new Response(
+      JSON.stringify({
+        items,
+        total: items.length,
+        page: 1,
+        page_size: 50,
+        pages: 1,
+      }),
+      { status: 200 },
+    );
+
+  it("shows the Admin nav link for platform_admin role", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(adminLoginMocks()[0])
+        .mockResolvedValueOnce(adminLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([]))
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Admin" }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Admin nav link for officer role", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(loginMocks()[0])
+        .mockResolvedValueOnce(loginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([]))
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await screen.findByRole("button", { name: "Refresh queue" });
+    expect(screen.queryByRole("button", { name: "Admin" })).not.toBeInTheDocument();
+  });
+
+  it("renders admin page with user list when Admin nav is clicked", async () => {
+    const userList = [
+      {
+        id: "u-admin-1",
+        email: "officer@example.com",
+        full_name: "Officer One",
+        is_active: true,
+        roles: ["officer"],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(adminLoginMocks()[0])
+        .mockResolvedValueOnce(adminLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([]))
+        .mockResolvedValueOnce(makeAdminUserList(userList)),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(await screen.findByRole("button", { name: "Admin" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Users and roles", level: 1 }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Officer One")).toBeInTheDocument();
+    expect(screen.getByText("officer@example.com")).toBeInTheDocument();
+  });
+
+  it("shows empty state when no users exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(adminLoginMocks()[0])
+        .mockResolvedValueOnce(adminLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([]))
+        .mockResolvedValueOnce(makeAdminUserList([])),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(await screen.findByRole("button", { name: "Admin" }));
+
+    expect(await screen.findByText("No users found.")).toBeInTheDocument();
+  });
+
+  it("shows role definitions panel with load button", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(adminLoginMocks()[0])
+        .mockResolvedValueOnce(adminLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([]))
+        .mockResolvedValueOnce(makeAdminUserList([])),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(await screen.findByRole("button", { name: "Admin" }));
+
+    expect(
+      await screen.findByText("Roles and permissions"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Load role definitions" }),
+    ).toBeInTheDocument();
+  });
 });

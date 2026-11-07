@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.v1.endpoints import admin as admin_router
 from app.api.v1.endpoints import audit as audit_router
 from app.api.v1.endpoints import auth as auth_router
 from app.api.v1.endpoints import coordinator as coordinator_router
@@ -96,4 +97,11 @@ api_v1_router.include_router(
     coordinator_router.router,
     prefix="/events",
     tags=["Coordinator"],
+)
+
+# Admin — user/role management (Gate 19, requires admin:users)
+api_v1_router.include_router(
+    admin_router.router,
+    prefix="/admin",
+    tags=["Admin"],
 )

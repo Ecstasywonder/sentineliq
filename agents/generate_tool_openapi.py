@@ -45,6 +45,32 @@ EXPECTED_OPERATION_IDS = {
 }
 
 
+def _tool_description(path: str, method: str, operation: dict[str, Any]) -> str:
+    """Return an Orchestrate-compatible description for an approved operation.
+
+    FastAPI only emits an OpenAPI ``description`` when the route author supplies
+    one.  Orchestrate rejects operations without it, so derive a stable,
+    human-readable description from the route summary when necessary.  The
+    route and operation ID remain in the final fallback so a future route that
+    loses both its prose fields is still importable and diagnosable.
+    """
+
+    description = operation.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+
+    summary = operation.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        summary_text = summary.strip().rstrip(".")
+        return f"Read-only SentinelIQ tool: {summary_text}."
+
+    operation_id = operation["operationId"]
+    return (
+        "Read-only SentinelIQ tool for "
+        f"{method.upper()} {path} (operation ID: {operation_id})."
+    )
+
+
 def build_tool_spec(api_base_url: str) -> dict[str, Any]:
     from app.main import app
 
@@ -62,7 +88,11 @@ def build_tool_spec(api_base_url: str) -> dict[str, Any]:
         if not isinstance(operation_id, str) or not operation_id:
             raise RuntimeError(f"Tool route has no stable operationId: {path}")
         operation_ids.add(operation_id)
-        selected_paths[path] = {method: operation}
+        # Do not mutate FastAPI's cached OpenAPI schema.  It is reused by the
+        # application and may be generated more than once in tests/processes.
+        selected_operation = dict(operation)
+        selected_operation["description"] = _tool_description(path, method, selected_operation)
+        selected_paths[path] = {method: selected_operation}
 
     if operation_ids != EXPECTED_OPERATION_IDS:
         raise RuntimeError(

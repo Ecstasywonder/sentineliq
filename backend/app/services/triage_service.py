@@ -3,10 +3,10 @@ TriageService — Gate 14 (dual-path, ADR-008).
 
 Invocation priority (three paths, highest to lowest):
 
-  PATH B — watsonx Orchestrate SaaS (primary, future)
+  PATH B — watsonx Orchestrate SaaS (primary when provisioned)
     Condition: settings.orchestrate_active == True
                (ORCHESTRATE_URL + API key both set)
-    Mechanism: IAM bearer token → POST /v2/orchestrate/<agent_id>/chat/completions
+    Mechanism: IAM bearer token → POST /v1/orchestrate/<deployed-agent-uuid>/chat/completions
     Benefits:  agent versioning, governance, collaborator chains,
                Orchestrate UI traces, human-approval steps, evaluation
 
@@ -317,9 +317,11 @@ class TriageService:
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
         """
-        Call the documented watsonx Orchestrate direct-agent chat API.
+        Call the watsonx Orchestrate SaaS direct-agent chat API.
 
         IBM Cloud SaaS authentication uses a short-lived IAM bearer token.
+        The runtime path is ``/v1/orchestrate/<deployed-agent-uuid>/chat/completions``;
+        imported agent display names are not valid runtime identifiers.
 
         The Orchestrate agent runtime:
           - Manages agent versioning and governance

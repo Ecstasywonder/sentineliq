@@ -25,7 +25,7 @@ def _mock_async_client(*responses: MagicMock) -> tuple[MagicMock, AsyncMock]:
 
 
 @pytest.mark.asyncio
-async def test_chat_uses_v2_iam_bearer_contract() -> None:
+async def test_chat_uses_v1_iam_bearer_contract() -> None:
     client, post = _mock_async_client(
         _response({"access_token": "short-lived-token"}),
         _response({"choices": [{"message": {"content": '{"ok":true}'}}]}),
@@ -36,7 +36,7 @@ async def test_chat_uses_v2_iam_bearer_contract() -> None:
             api_key="cloud-api-key",
             timeout=12.0,
         ).chat(
-            agent_id="triage agent/1",
+            agent_id="11111111-2222-4333-8444-555555555555",
             system_prompt="Return JSON.",
             input_payload={"event_id": "EVT-1"},
         )
@@ -47,8 +47,8 @@ async def test_chat_uses_v2_iam_bearer_contract() -> None:
     assert iam_call.args[0] == "https://iam.cloud.ibm.com/identity/token"
     assert iam_call.kwargs["data"]["apikey"] == "cloud-api-key"
     assert chat_call.args[0] == (
-        "https://tenant.ibm-watson-orchestrate.com/v2/orchestrate/"
-        "triage%20agent%2F1/chat/completions"
+        "https://tenant.ibm-watson-orchestrate.com/v1/orchestrate/"
+        "11111111-2222-4333-8444-555555555555/chat/completions"
     )
     assert chat_call.kwargs["headers"]["Authorization"] == "Bearer short-lived-token"
     assert chat_call.kwargs["json"]["stream"] is False
@@ -79,13 +79,17 @@ async def test_chat_accepts_openai_text_content_parts() -> None:
             base_url=("https://us-south.watson-orchestrate.cloud.ibm.com/instances/instance-123/"),
             api_key="key",
             timeout=12.0,
-            api_version="v1_5",
-        ).chat(agent_id="agent", system_prompt="prompt", input_payload={})
+            api_version="v1",
+        ).chat(
+            agent_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            system_prompt="prompt",
+            input_payload={},
+        )
 
     assert content == "first second"
     assert post.await_args_list[1].args[0] == (
         "https://us-south.watson-orchestrate.cloud.ibm.com/instances/instance-123/"
-        "v1_5/orchestrate/agent/chat/completions"
+        "v1/orchestrate/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/chat/completions"
     )
 
 
@@ -103,7 +107,11 @@ async def test_chat_rejects_undocumented_top_level_output_shape() -> None:
             base_url="https://tenant.ibm-watson-orchestrate.com",
             api_key="key",
             timeout=12.0,
-        ).chat(agent_id="agent", system_prompt="prompt", input_payload={})
+        ).chat(
+            agent_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            system_prompt="prompt",
+            input_payload={},
+        )
 
 
 @pytest.mark.asyncio
@@ -117,7 +125,11 @@ async def test_chat_stops_when_iam_exchange_has_no_access_token() -> None:
             base_url="https://tenant.ibm-watson-orchestrate.com",
             api_key="key",
             timeout=12.0,
-        ).chat(agent_id="agent", system_prompt="prompt", input_payload={})
+        ).chat(
+            agent_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            system_prompt="prompt",
+            input_payload={},
+        )
 
     assert post.await_count == 1
 
@@ -160,6 +172,30 @@ def test_client_rejects_unsafe_base_url_before_network_call(base_url: str) -> No
 )
 def test_client_accepts_allowlisted_saas_base_urls(base_url: str) -> None:
     OrchestrateClient(base_url=base_url, api_key="secret", timeout=12.0)
+
+
+def test_client_rejects_legacy_runtime_version() -> None:
+    with pytest.raises(ValueError, match="API version must be v1"):
+        OrchestrateClient(
+            base_url="https://tenant.ibm-watson-orchestrate.com",
+            api_key="secret",
+            timeout=12.0,
+            api_version="v2",  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_id", ["", "sentinel_triage_agent", "not-a-uuid"])
+async def test_chat_rejects_non_uuid_agent_id_before_iam_exchange(agent_id: str) -> None:
+    with patch("app.services.orchestrate_client.httpx.AsyncClient") as async_client:
+        with pytest.raises(ValueError, match="deployed agent UUID"):
+            await OrchestrateClient(
+                base_url="https://tenant.ibm-watson-orchestrate.com",
+                api_key="secret",
+                timeout=12.0,
+            ).chat(agent_id=agent_id, system_prompt="prompt", input_payload={})
+
+    async_client.assert_not_called()
 
 
 @pytest.mark.parametrize(

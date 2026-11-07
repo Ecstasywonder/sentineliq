@@ -386,8 +386,8 @@ def _settings_path_b():
     m.watsonx_active = False
     m.agent_invoke_timeout = 30.0
     m.orchestrate_url = "https://tenant.ibm-watson-orchestrate.com"
-    m.orchestrate_api_version = "v2"
-    m.orchestrate_triage_agent_id = "sentinel_triage_agent"
+    m.orchestrate_api_version = "v1"
+    m.orchestrate_triage_agent_id = "11111111-2222-4333-8444-555555555555"
     m.effective_orchestrate_api_key = "test-key"
     return m
 
@@ -561,7 +561,8 @@ class TestTriageServiceRun:
         settings.watsonx_active = True
         settings.agent_invoke_timeout = 30.0
         settings.orchestrate_url = "https://tenant.ibm-watson-orchestrate.com"
-        settings.orchestrate_triage_agent_id = "sentinel_triage_agent"
+        settings.orchestrate_api_version = "v1"
+        settings.orchestrate_triage_agent_id = "11111111-2222-4333-8444-555555555555"
         settings.effective_watsonx_api_key = "test-key"
         settings.watsonx_model_id = "ibm/granite-4-h-small"
         settings.effective_watsonx_base_url = "https://us-south.ml.cloud.ibm.com"

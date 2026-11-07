@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
-from app.models.user import Role, User, UserRole, VALID_ROLES
+from app.models.user import VALID_ROLES, Role, User, UserRole
 from app.security.dependencies import AuthenticatedUser, get_current_user
 from app.security.passwords import hash_password
 

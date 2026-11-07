@@ -20,16 +20,18 @@ SentinelIQ never autonomously enforces security actions.
 ## Project Status
 
 The [Master Build Prompt](docs/master-build-prompt.md) defines the canonical gate
-sequence. Older gate reports retain their original labels; the
+sequence. The [source-of-truth guide](docs/source-of-truth.md) defines how
+requirements, source, runtime evidence, and EC2 copies are reconciled. Older
+gate reports retain their original labels; the
 [master gate plan](docs/master-gate-plan.md) contains the numbering crosswalk.
 
 | Gate | Title | Status |
 |------|-------|--------|
 | 0 | Environment and source-of-truth validation | ✅ Complete |
 | 1 | BRD, SOP, and architecture specification | ✅ Complete |
-| 2 | Repository scaffold and developer foundation | ⚠️ Partial — formatter, frontend lint, and CI validation need resolution |
+| 2 | Repository scaffold and developer foundation | 🟡 Candidate complete on EC2; strict completion awaits CI and merge |
 | 3 | Database and domain model | ✅ Complete |
-| 4 | Security-event simulator | 🔲 Not started |
+| 4 | Security-event simulator | ✅ Complete |
 | 5 | Event ingestion and event queue backend | ✅ Complete |
 | 6 | Evidence-source services | ✅ Complete |
 | 7 | Orchestrate tool layer | ⚠️ Partial — schemas exist; tenant import/live validation outstanding |
@@ -38,20 +40,25 @@ sequence. Older gate reports retain their original labels; the
 | 10 | Confidence engine | ✅ Complete |
 | 11 | Triage Agent | ⚠️ Partial — implementation/tests exist; live Orchestrate validation outstanding |
 | 12 | Context Agent | ⚠️ Partial — implementation/tests exist; live Orchestrate validation outstanding |
-| 13 | Explanation Agent | 🟡 In progress — 427 backend tests pass on EC2; not merged; live provider integration unverified |
-| 14 | Coordinator and end-to-end agent workflow | ⚠️ Partial |
+| 13 | Explanation Agent | 🟡 Candidate implementation validated on EC2; live provider integration and strict CI/merge evidence remain outstanding |
+| 14 | Coordinator and end-to-end agent workflow | ⚠️ Partial — backend workflow passes on EC2; live Coordinator import/invocation unverified |
 | 15 | Human-review workflow | ✅ Backend APIs implemented |
-| 16 | Operator dashboard foundation | ⚠️ Shell scaffold only; authentication, queue, filters, and navigation remain |
+| 16 | Operator dashboard foundation | 🟡 Implementation complete on EC2; strict completion awaits CI and merge |
 | 17–48 | Remaining MVP and production gates | 🔲 Pending |
 
-**EC2 validation of Gates 14–15 implementation:** 397 backend tests passed,
-91.57% coverage, and `ruff check` passed. `ruff format --check` failed on 31 files;
-the GitHub Actions run failed without creating jobs. See the
-[master gate plan](docs/master-gate-plan.md) for details.
+**Latest EC2 candidate validation:** 533 backend tests passed at 90.48% coverage;
+Ruff check and format passed across 114 Python files. Frontend format, type
+check, lint, 14 unit tests, production build, and same-origin container proxy
+smoke test passed. Production dependency audit found zero
+vulnerabilities; six moderate dev-only transitive findings remain in the full
+audit. Fresh and legacy-stamp PostgreSQL migration paths reached Alembic head
+`0004` with 29 public tables. Clean container builds also verified that runtime
+`.env` and key files are excluded from image layers. See
+[Gate 14/16 completion evidence](docs/gate-14-16-completion.md).
 
-**Current gate:** Gate 13 — Explanation Agent. Its backend suite passed on an
-isolated EC2 worktree (427 tests); live watsonx provider integration remains
-unverified. Do not begin Gate 14 until Gate 13 is completed and merged.
+**Current focus:** close live Orchestrate Coordinator import/invocation evidence
+for Gate 14, then validate in CI and merge the pushed candidate changes before
+marking strict gate completion.
 
 ---
 
@@ -61,6 +68,7 @@ unverified. Do not begin Gate 14 until Gate 13 is completed and merged.
 |--------|------|-------------|
 | `POST` | `/api/v1/auth/token` | Login — returns JWT |
 | `POST` | `/api/v1/auth/refresh` | Rotate access token |
+| `POST` | `/api/v1/auth/logout` | Revoke the refresh-token family |
 | `GET` | `/api/v1/auth/me` | Caller identity |
 | `POST` | `/api/v1/events` | Ingest a security event |
 | `GET` | `/api/v1/events` | Paginated event queue (risk-priority ordered) |

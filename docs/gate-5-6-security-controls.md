@@ -6,11 +6,13 @@ Login creates a refresh-token family and persists only the SHA-256 hash, token
 ID, family ID, user ID, and expiry in `refresh_tokens`. Each refresh is a
 one-time atomic rotation under a database row lock. Reuse of a consumed,
 revoked, or expired token revokes the entire family, including descendants.
+A logout request is non-enumerating and idempotently revokes the presented
+token's entire family before the browser clears its local session.
 A signed JWT without a matching database record is invalid.
 
-Apply migration `0003_refresh_token_rotation` on EC2 before starting the
-updated API. Existing stateless refresh tokens intentionally become invalid;
-users must log in again after deployment.
+Apply `alembic upgrade head` on EC2 before starting the updated API (the current
+head is `0004_decision_snapshot`). Existing stateless refresh tokens
+intentionally become invalid; users must log in again after deployment.
 
 ## Rate and body limits
 
@@ -18,7 +20,7 @@ When `ENABLE_RATE_LIMITING=true`, the API enforces three sliding-window scopes:
 
 - all `/api/v1` requests: `RATE_LIMIT_API_PER_MINUTE` per peer/authenticated principal;
 - event ingestion: `RATE_LIMIT_EVENTS_PER_MINUTE` in addition to the API limit;
-- login and refresh: `RATE_LIMIT_AUTH_PER_MINUTE` per direct peer in addition
+- login, refresh, and logout: `RATE_LIMIT_AUTH_PER_MINUTE` per direct peer in addition
   to the API limit; optional bearer headers cannot select another auth bucket.
 
 Rejected requests return `429`, `Retry-After`, and structured error code

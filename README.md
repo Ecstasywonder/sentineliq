@@ -49,13 +49,15 @@ gate reports retain their original labels; the
 | 19 | RBAC and administrative controls | ✅ Complete |
 | 20 | Integration and failure-state hardening | ✅ Complete |
 | 21 | Evaluation framework | ✅ Complete |
-| 22–48 | Remaining MVP and production gates | 🔲 Pending |
+| 22 | Security and adversarial testing | ✅ Complete |
+| 23–48 | Remaining MVP and production gates | 🔲 Pending |
 
-**Latest EC2 validation (Gate 21):** 744 backend tests passed (30.05s), 39 frontend tests passed;
-15 scorer unit tests passed; ruff check + format clean across 126 files; production Vite build succeeded.
-See [Gate 21 report](docs/gate-21-evaluation-framework.md).
+**Latest validation (Gate 22):** 782 backend tests passed with 90.82% coverage on
+isolated EC2; 39 frontend tests, dependency and secret scans, and both production
+image scans passed. The required GitHub CI Gate passed and PR #2 merged as
+`4a9d8c0`. See the [Gate 22 report](docs/gate-22-ci-supply-chain.md).
 
-**Current focus:** Gate 22 — Security and adversarial testing.
+**Stop point:** Gate 22 is complete. Gate 23 has not started.
 
 ---
 

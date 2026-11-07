@@ -37,6 +37,26 @@ export interface RiskFactor {
   contribution: number;
 }
 
+export interface TriageResult {
+  category: string;
+  urgency_signals: string[];
+  required_context: string[];
+  triage_rationale: string;
+  source: string;
+  agent_run_id: string | null;
+}
+
+export interface ContextResult {
+  source_statuses: Array<{ source_id: string; status: string }>;
+  conflicts: string[];
+  missing_sources: string[];
+  context_summary: string;
+  has_conflicts: boolean;
+  has_missing_sources: boolean;
+  source: string;
+  agent_run_id: string | null;
+}
+
 export interface Assessment {
   assessment_id?: string;
   event_id: string;
@@ -56,6 +76,8 @@ export interface Assessment {
   sources_required: number;
   evidence_errors: Record<string, string>;
   assessed_at: string;
+  triage?: TriageResult | null;
+  context?: ContextResult | null;
   explanation?: {
     summary?: string;
     recommendation?: string;
@@ -65,6 +87,28 @@ export interface Assessment {
     why?: Array<{ text: string; evidence_ids: string[] }>;
     citations?: Array<{ source_id?: string; label?: string }>;
   } | null;
+}
+
+export interface CoordinatorReview {
+  event_id: string;
+  assessment_ready: boolean;
+  summary: string;
+  missing_evidence: string[];
+  human_review_required: boolean;
+  source: string;
+  agent_run_id: string | null;
+}
+
+export interface Escalation {
+  id: string;
+  event_id: string;
+  reason: string;
+  escalated_by: string;
+  escalated_to: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Decision {
@@ -315,3 +359,14 @@ export const recordDecision = (
       is_override: decision === "override",
     }),
   });
+
+export const getCoordinatorReview = (eventId: string) =>
+  request<CoordinatorReview>(`/events/${encodeURIComponent(eventId)}/review`);
+
+export const getEscalation = (eventId: string) =>
+  request<Escalation>(`/events/${encodeURIComponent(eventId)}/escalation`);
+
+export const getDecisionHistory = (eventId: string) =>
+  request<{ decisions: Decision[] }>(
+    `/events/${encodeURIComponent(eventId)}/decisions`,
+  );

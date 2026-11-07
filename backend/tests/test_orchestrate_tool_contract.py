@@ -46,8 +46,7 @@ def test_description_fallback_is_deterministic_and_includes_operation_identity()
     operation = {"operationId": "get_example"}
 
     assert module._tool_description("/api/v1/tools/example", "get", operation) == (
-        "Read-only SentinelIQ tool for GET /api/v1/tools/example "
-        "(operation ID: get_example)."
+        "Read-only SentinelIQ tool for GET /api/v1/tools/example (operation ID: get_example)."
     )
 
 
@@ -94,10 +93,7 @@ def test_every_generated_tool_requires_authentication() -> None:
 
 def test_connection_contract_configures_draft_and_live_runtime_environments() -> None:
     connection_path = (
-        Path(__file__).resolve().parents[2]
-        / "agents"
-        / "connections"
-        / "sentineliq-api.yaml"
+        Path(__file__).resolve().parents[2] / "agents" / "connections" / "sentineliq-api.yaml"
     )
     connection = yaml.safe_load(connection_path.read_text(encoding="utf-8"))
 

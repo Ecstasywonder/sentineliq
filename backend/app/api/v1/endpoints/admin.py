@@ -419,7 +419,7 @@ async def list_roles() -> RolesResponse:
 
     This is a static reference — it derives from the RBAC module, not the DB.
     """
-    _DESCRIPTIONS = {
+    _role_descriptions = {
         "officer": "Security Monitoring Officer — reviews events, makes decisions, escalates",
         "supervisor": "Shift Supervisor — oversees officers, can override decisions, views audit trail",
         "response_team": "Response Team — views events and responds to incidents",
@@ -433,7 +433,7 @@ async def list_roles() -> RolesResponse:
     roles = [
         RoleDescription(
             name=role_name,
-            description=_DESCRIPTIONS.get(role_name, role_name),
+            description=_role_descriptions.get(role_name, role_name),
             permissions=sorted(_ROLE_PERMISSIONS.get(role_name, frozenset())),
         )
         for role_name in VALID_ROLES

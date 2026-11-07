@@ -1,0 +1,18 @@
+# Vite environment values are build inputs only when deliberately supplied;
+# local env and key files must never enter an image layer.
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# Exclude local dependencies, generated output, reports, and VCS metadata.
+.git
+.gitignore
+node_modules
+dist
+coverage
+playwright-report
+test-results

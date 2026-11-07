@@ -1,4 +1,10 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ApiError,
   assessEvent,
@@ -9,53 +15,93 @@ import {
   type Assessment,
   type RiskLevel,
   type SecurityEvent,
-} from './api'
-import { useAuth } from './auth'
+} from "./api";
+import { useAuth } from "./auth";
 
-const statuses = ['', 'normalised', 'assessing', 'awaiting_review', 'escalated', 'closed', 'dismissed']
-const risks = ['', 'critical', 'high', 'medium', 'low']
-const decisions = ['accept', 'reject', 'dismiss', 'request_context', 'escalate', 'override']
+const statuses = [
+  "",
+  "received",
+  "normalised",
+  "assessing",
+  "awaiting_review",
+  "context_incomplete",
+  "escalated",
+  "closed",
+  "dismissed",
+  "failed",
+];
+const risks = ["", "critical", "high", "medium", "low"];
+const standardDecisions = ["accept", "reject", "dismiss", "request_context"];
+const decisionRoles = new Set([
+  "officer",
+  "supervisor",
+  "security_admin",
+  "platform_admin",
+]);
+const escalationRoles = new Set([
+  "officer",
+  "supervisor",
+  "security_admin",
+  "platform_admin",
+]);
+const overrideRoles = new Set([
+  "supervisor",
+  "security_admin",
+  "platform_admin",
+]);
 
 const riskLabel = (risk: RiskLevel | null) =>
-  risk ? `${risk[0].toUpperCase()}${risk.slice(1)}` : 'Not assessed'
+  risk ? `${risk[0].toUpperCase()}${risk.slice(1)}` : "Not assessed";
 
-const humanize = (value: string) => value.replace(/_/g, ' ')
+const humanize = (value: string) => value.replace(/_/g, " ");
 
-const formatTime = (value: string) =>
-  new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(value),
-  )
+const formatTime = (value: string) => {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.valueOf())) return "Unavailable";
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(timestamp);
+};
 
 const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback
+  error instanceof Error ? error.message : fallback;
 
 function Login(): React.JSX.Element {
-  const { signIn } = useAuth()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    setSubmitting(true)
-    setError('')
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
 
     try {
-      await signIn(email, password)
+      await signIn(email, password);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Unable to sign in. Please try again.')
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "Unable to sign in. Please try again.",
+      );
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   return (
     <main className="login-page">
       <section className="login-card" aria-labelledby="login-title">
         <p className="eyebrow">SentinelIQ</p>
         <h1 id="login-title">Operator sign in</h1>
-        <p>Use your authorised SentinelIQ account to review the security event queue.</p>
+        <p>
+          Use your authorised SentinelIQ account to review the security event
+          queue.
+        </p>
         <form onSubmit={submit}>
           <label htmlFor="email">Email address</label>
           <input
@@ -84,56 +130,54 @@ function Login(): React.JSX.Element {
           )}
 
           <button type="submit" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
-        <p className="notice">All security decisions require human review and approval.</p>
+        <p className="notice">
+          All security decisions require human review and approval.
+        </p>
       </section>
     </main>
-  )
+  );
 }
 
-function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JSX.Element {
-  const [status, setStatus] = useState('awaiting_review')
-  const [risk, setRisk] = useState('')
-  const [sort, setSort] = useState('priority')
-  const [events, setEvents] = useState<SecurityEvent[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+function EventQueue({
+  onOpen,
+}: {
+  onOpen: (eventId: string) => void;
+}): React.JSX.Element {
+  const [status, setStatus] = useState("awaiting_review");
+  const [risk, setRisk] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const requestGeneration = useRef(0);
 
-  const load = async () => {
-    setLoading(true)
-    setError('')
+  const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    setLoading(true);
+    setError("");
 
     try {
-      const result = await getEvents(status, risk)
-      setEvents(result.items)
-      setTotal(result.total)
+      const result = await getEvents(status, risk, page);
+      if (generation !== requestGeneration.current) return;
+      setEvents(result.items);
+      setTotal(result.total);
+      setPages(result.pages);
     } catch (e) {
-      setError(errorMessage(e, 'The event queue could not be loaded.'))
+      if (generation !== requestGeneration.current) return;
+      setError(errorMessage(e, "The event queue could not be loaded."));
     } finally {
-      setLoading(false)
+      if (generation === requestGeneration.current) setLoading(false);
     }
-  }
+  }, [page, risk, status]);
 
   useEffect(() => {
-    void load()
-  }, [status, risk])
-
-  const orderedEvents = useMemo(
-    () =>
-      [...events].sort((left, right) => {
-        if (sort === 'newest') {
-          return Date.parse(right.event_timestamp) - Date.parse(left.event_timestamp)
-        }
-        if (sort === 'oldest') {
-          return Date.parse(left.event_timestamp) - Date.parse(right.event_timestamp)
-        }
-        return 0
-      }),
-    [events, sort],
-  )
+    void load();
+  }, [load]);
 
   return (
     <section aria-labelledby="queue-title">
@@ -143,11 +187,15 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
           <h1 id="queue-title">Security event queue</h1>
           <p>
             {loading
-              ? 'Loading events…'
-              : `${total} event${total === 1 ? '' : 's'} match the current filters.`}
+              ? "Loading events…"
+              : `${total} event${total === 1 ? "" : "s"} match the current filters. Page ${page} of ${pages}.`}
           </p>
         </div>
-        <button className="secondary" onClick={() => void load()} disabled={loading}>
+        <button
+          className="secondary"
+          onClick={() => void load()}
+          disabled={loading}
+        >
           Refresh queue
         </button>
       </div>
@@ -155,10 +203,16 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
       <div className="filters" aria-label="Event filters">
         <label>
           Status
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <select
+            value={status}
+            onChange={(event) => {
+              setPage(1);
+              setStatus(event.target.value);
+            }}
+          >
             {statuses.map((value) => (
               <option key={value} value={value}>
-                {value ? humanize(value) : 'All statuses'}
+                {value ? humanize(value) : "All statuses"}
               </option>
             ))}
           </select>
@@ -166,21 +220,20 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
 
         <label>
           Risk level
-          <select value={risk} onChange={(event) => setRisk(event.target.value)}>
+          <select
+            value={risk}
+            onChange={(event) => {
+              setPage(1);
+              setRisk(event.target.value);
+            }}
+          >
             {risks.map((value) => (
               <option key={value} value={value}>
-                {value ? `${riskLabel(value as RiskLevel)} risk` : 'All risk levels'}
+                {value
+                  ? `${riskLabel(value as RiskLevel)} risk`
+                  : "All risk levels"}
               </option>
             ))}
-          </select>
-        </label>
-
-        <label>
-          Order
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
-            <option value="priority">Risk priority</option>
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
           </select>
         </label>
       </div>
@@ -194,15 +247,21 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
         <p className="loading" role="status">
           Loading the event queue…
         </p>
-      ) : orderedEvents.length === 0 ? (
+      ) : events.length === 0 ? (
         <div className="empty">
           <h2>No events found</h2>
-          <p>There are no events matching these filters. Change a filter or refresh the queue.</p>
+          <p>
+            There are no events matching these filters. Change a filter or
+            refresh the queue.
+          </p>
         </div>
       ) : (
         <div className="table-wrap">
           <table>
-            <caption className="sr-only">Security events, ordered by the selected order</caption>
+            <caption className="sr-only">
+              Security events returned by the service. Risk indicates review
+              priority.
+            </caption>
             <thead>
               <tr>
                 <th>Risk</th>
@@ -217,14 +276,18 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
               </tr>
             </thead>
             <tbody>
-              {orderedEvents.map((item) => (
+              {events.map((item) => (
                 <tr key={item.id}>
                   <td>
-                    <span className={`badge risk-${item.risk.level ?? 'unknown'}`}>
+                    <span
+                      className={`badge risk-${item.risk.level ?? "unknown"}`}
+                    >
                       {riskLabel(item.risk.level)}
                     </span>
                     <small>
-                      {item.risk.score === null ? 'Score unavailable' : `Score ${item.risk.score.toFixed(2)}`}
+                      {item.risk.score === null
+                        ? "Score unavailable"
+                        : `Score ${item.risk.score.toFixed(1)} / 200`}
                     </small>
                   </td>
                   <td>
@@ -233,13 +296,17 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
                   </td>
                   <td>
                     {item.location_id}
-                    <small>{item.zone ?? item.facility_id ?? 'Location detail unavailable'}</small>
+                    <small>
+                      {item.zone ??
+                        item.facility_id ??
+                        "Location detail unavailable"}
+                    </small>
                   </td>
                   <td>
                     {item.confidence.score === null
-                      ? 'Unavailable'
+                      ? "Unavailable"
                       : `${Math.round(item.confidence.score * 100)}%`}
-                    <small>{item.confidence.level ?? 'Not assessed'}</small>
+                    <small>{item.confidence.level ?? "Not assessed"}</small>
                   </td>
                   <td>
                     <span className="status">{humanize(item.status)}</span>
@@ -260,24 +327,56 @@ function EventQueue({ onOpen }: { onOpen: (eventId: string) => void }): React.JS
           </table>
         </div>
       )}
+
+      {!loading && !error && pages > 1 && (
+        <nav className="pagination" aria-label="Event queue pages">
+          <button
+            className="secondary"
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Previous
+          </button>
+          <span aria-live="polite">
+            Page {page} of {pages}
+          </span>
+          <button
+            className="secondary"
+            type="button"
+            disabled={page >= pages}
+            onClick={() => setPage((current) => Math.min(pages, current + 1))}
+          >
+            Next
+          </button>
+        </nav>
+      )}
     </section>
-  )
+  );
 }
 
-function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void }): React.JSX.Element {
-  const [event, setEvent] = useState<SecurityEvent | null>(null)
-  const [assessment, setAssessment] = useState<Assessment | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [actionError, setActionError] = useState('')
-  const [assessing, setAssessing] = useState(false)
-  const [decision, setDecision] = useState('accept')
-  const [rationale, setRationale] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+function EventDetail({
+  eventId,
+  onBack,
+  roles,
+}: {
+  eventId: string;
+  onBack: () => void;
+  roles: string[];
+}): React.JSX.Element {
+  const [event, setEvent] = useState<SecurityEvent | null>(null);
+  const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [assessing, setAssessing] = useState(false);
+  const [decision, setDecision] = useState("accept");
+  const [rationale, setRationale] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const load = async () => {
-    setLoading(true)
-    setError('')
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
     try {
       const [nextEvent, nextAssessment] = await Promise.all([
@@ -285,79 +384,103 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
         getAssessment(eventId).catch((e: unknown) =>
           e instanceof ApiError && e.status === 404 ? null : Promise.reject(e),
         ),
-      ])
-      setEvent(nextEvent)
-      setAssessment(nextAssessment)
+      ]);
+      setEvent(nextEvent);
+      setAssessment(nextAssessment);
     } catch (e) {
-      setError(errorMessage(e, 'The event could not be loaded.'))
+      setError(errorMessage(e, "The event could not be loaded."));
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  }, [eventId]);
 
   useEffect(() => {
-    void load()
-  }, [eventId])
+    void load();
+  }, [load]);
 
   const runAssessment = async () => {
-    setAssessing(true)
-    setActionError('')
+    setAssessing(true);
+    setActionError("");
 
     try {
-      const nextAssessment = await assessEvent(eventId)
-      setAssessment(nextAssessment)
-      setEvent(await getEvent(eventId))
+      const nextAssessment = await assessEvent(eventId);
+      setAssessment(nextAssessment);
+      setEvent(await getEvent(eventId));
     } catch (e) {
-      setActionError(errorMessage(e, 'Assessment could not be completed.'))
+      setActionError(errorMessage(e, "Assessment could not be completed."));
     } finally {
-      setAssessing(false)
+      setAssessing(false);
     }
-  }
+  };
 
   const submitDecision = async (form: FormEvent) => {
-    form.preventDefault()
-    setSubmitting(true)
-    setActionError('')
+    form.preventDefault();
+    setSubmitting(true);
+    setActionError("");
 
     try {
-      await recordDecision(eventId, decision, rationale)
-      setRationale('')
-      await load()
+      await recordDecision(eventId, decision, rationale);
+      setRationale("");
+      await load();
     } catch (e) {
-      setActionError(errorMessage(e, 'Decision could not be recorded.'))
+      setActionError(errorMessage(e, "Decision could not be recorded."));
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   if (loading) {
     return (
       <section className="loading" role="status">
         Loading event details…
       </section>
-    )
+    );
   }
 
   if (error || !event) {
     return (
       <section className="error-panel" role="alert">
-        <p>{error || 'Event not found.'}</p>
+        <p>{error || "Event not found."}</p>
         <button onClick={onBack}>Return to queue</button>
       </section>
-    )
+    );
   }
 
-  const explanation = assessment?.explanation
-  const recommendation = explanation?.recommended_action ?? explanation?.recommendation ?? 'No recommendation has been generated yet.'
-  const whyReasons = explanation?.why ?? []
-  const missingEvidence = explanation?.missing_evidence ?? []
-  const riskFactors = assessment?.risk_factors ?? []
-  const confidenceReductions = assessment?.confidence_reductions ?? []
+  const explanation = assessment?.explanation;
+  const recommendation =
+    explanation?.recommended_action ??
+    explanation?.recommendation ??
+    "No recommendation has been generated yet.";
+  const whyReasons = explanation?.why ?? [];
+  const missingEvidence = explanation?.missing_evidence ?? [];
+  const riskFactors = assessment?.risk_factors ?? [];
+  const confidenceReductions = assessment?.confidence_reductions ?? [];
   const timeline = [
-    { label: 'Event received', value: formatTime(event.event_timestamp) },
-    { label: 'Assessment ready', value: assessment ? formatTime(assessment.assessed_at) : 'Pending' },
-    { label: 'Operator review', value: event.status === 'closed' ? 'Completed' : 'Required' },
-  ]
+    { label: "Event received", value: formatTime(event.event_timestamp) },
+    {
+      label: "Assessment ready",
+      value: assessment ? formatTime(assessment.assessed_at) : "Pending",
+    },
+    {
+      label: "Operator review",
+      value: event.status === "closed" ? "Completed" : "Required",
+    },
+  ];
+  const mayDecide = roles.some((role) => decisionRoles.has(role));
+  const mayEscalate = roles.some((role) => escalationRoles.has(role));
+  const mayOverride = roles.some((role) => overrideRoles.has(role));
+  const availableDecisions = [
+    ...standardDecisions,
+    ...(mayEscalate ? ["escalate"] : []),
+    ...(mayOverride ? ["override"] : []),
+  ];
+  const canAssess =
+    mayDecide &&
+    (event.status === "normalised" || event.status === "context_incomplete");
+  const canDecide =
+    mayDecide &&
+    assessment !== null &&
+    (event.status === "awaiting_review" || event.status === "escalated");
 
   return (
     <section aria-labelledby="detail-title">
@@ -371,9 +494,19 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
           <h1 id="detail-title">{humanize(event.event_type)}</h1>
           <p>{event.id}</p>
         </div>
-        <button className="secondary" onClick={() => void runAssessment()} disabled={assessing}>
-          {assessing ? 'Assessing…' : 'Run assessment'}
-        </button>
+        {canAssess && (
+          <button
+            className="secondary"
+            onClick={() => void runAssessment()}
+            disabled={assessing}
+          >
+            {assessing
+              ? "Assessing…"
+              : event.status === "context_incomplete"
+                ? "Retry assessment"
+                : "Run assessment"}
+          </button>
+        )}
       </div>
 
       <div className="meta-grid">
@@ -386,7 +519,7 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
             </div>
             <div>
               <dt>Zone</dt>
-              <dd>{event.zone ?? 'Not provided'}</dd>
+              <dd>{event.zone ?? "Not provided"}</dd>
             </div>
             <div>
               <dt>Status</dt>
@@ -417,7 +550,10 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
               </div>
               <div>
                 <dt>Summary</dt>
-                <dd>{assessment.explanation?.summary ?? 'No explanation available yet.'}</dd>
+                <dd>
+                  {assessment.explanation?.summary ??
+                    "No explanation available yet."}
+                </dd>
               </div>
             </dl>
           ) : (
@@ -442,12 +578,16 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
               <div>
                 <dt>Evidence coverage</dt>
                 <dd>
-                  {assessment.sources_available} of {assessment.sources_required} sources available
+                  {assessment.sources_available} of{" "}
+                  {assessment.sources_required} sources available
                 </dd>
               </div>
               <div>
                 <dt>Confidence</dt>
-                <dd>{assessment.confidence_level} · {Math.round(assessment.confidence_score * 100)}%</dd>
+                <dd>
+                  {assessment.confidence_level} ·{" "}
+                  {Math.round(assessment.confidence_score * 100)}%
+                </dd>
               </div>
             </dl>
 
@@ -459,8 +599,8 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
                     <span>{factor.label}</span>
                     <strong>
                       {factor.triggered
-                        ? `${factor.contribution > 0 ? '+' : ''}${factor.contribution.toFixed(1)} risk points`
-                        : 'Not triggered'}
+                        ? `${factor.contribution > 0 ? "+" : ""}${factor.contribution.toFixed(1)} risk points`
+                        : "Not triggered"}
                     </strong>
                   </li>
                 ))}
@@ -475,7 +615,11 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
                 {confidenceReductions.map((item, index) => (
                   <li key={`${item.reason}-${index}`}>
                     <span>{item.reason}</span>
-                    <strong>{item.amount > 0 ? `-${item.amount.toFixed(2)}` : item.amount.toFixed(2)}</strong>
+                    <strong>
+                      {item.amount > 0
+                        ? `-${item.amount.toFixed(2)}`
+                        : item.amount.toFixed(2)}
+                    </strong>
                   </li>
                 ))}
               </ul>
@@ -497,9 +641,13 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
                   {whyReasons.map((reason, index) => (
                     <li key={`${reason.text}-${index}`}>
                       {reason.text}
-                      {reason.evidence_ids && reason.evidence_ids.length > 0 && (
-                        <small> Evidence: {reason.evidence_ids.join(', ')}</small>
-                      )}
+                      {reason.evidence_ids &&
+                        reason.evidence_ids.length > 0 && (
+                          <small>
+                            {" "}
+                            Evidence: {reason.evidence_ids.join(", ")}
+                          </small>
+                        )}
                     </li>
                   ))}
                 </ul>
@@ -540,46 +688,64 @@ function EventDetail({ eventId, onBack }: { eventId: string; onBack: () => void 
         </div>
       )}
 
-      <form className="decision-form" onSubmit={submitDecision}>
-        <h2>Human review decision</h2>
-        <label>
-          Decision
-          <select value={decision} onChange={(event) => setDecision(event.target.value)}>
-            {decisions.map((item) => (
-              <option key={item} value={item}>
-                {humanize(item)}
-              </option>
-            ))}
-          </select>
-        </label>
+      {canDecide ? (
+        <form className="decision-form" onSubmit={submitDecision}>
+          <h2>Human review decision</h2>
+          <label>
+            Decision
+            <select
+              value={decision}
+              onChange={(event) => setDecision(event.target.value)}
+            >
+              {availableDecisions.map((item) => (
+                <option key={item} value={item}>
+                  {humanize(item)}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label>
-          Rationale
-          <textarea
-            value={rationale}
-            onChange={(event) => setRationale(event.target.value)}
-            placeholder="Explain the operator decision for this event."
-          />
-        </label>
+          <label>
+            Rationale
+            <textarea
+              value={rationale}
+              maxLength={2000}
+              onChange={(event) => setRationale(event.target.value)}
+              placeholder="Explain the operator decision for this event."
+            />
+          </label>
 
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Recording decision…' : 'Record decision'}
-        </button>
-      </form>
+          <button type="submit" disabled={submitting}>
+            {submitting ? "Recording decision…" : "Record decision"}
+          </button>
+        </form>
+      ) : (
+        <p className="notice">
+          {mayDecide
+            ? "A human decision can be recorded only after assessment reaches the review queue."
+            : "Your role can view this event but cannot run assessments or record decisions."}
+        </p>
+      )}
     </section>
-  )
+  );
 }
 
 export default function App(): React.JSX.Element {
-  const { user, loading, signOut } = useAuth()
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const { user, loading, signOut } = useAuth();
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   if (loading) {
-    return <div className="app-shell"><p className="loading" role="status">Loading session…</p></div>
+    return (
+      <div className="app-shell">
+        <p className="loading" role="status">
+          Loading session…
+        </p>
+      </div>
+    );
   }
 
   if (!user) {
-    return <Login />
+    return <Login />;
   }
 
   return (
@@ -590,6 +756,17 @@ export default function App(): React.JSX.Element {
           <h1>Security operations</h1>
         </div>
         <div className="topbar-actions">
+          <nav aria-label="Primary navigation">
+            <button
+              className="nav-link"
+              type="button"
+              aria-current={selectedEventId ? undefined : "page"}
+              onClick={() => setSelectedEventId(null)}
+            >
+              Event queue
+            </button>
+            {selectedEventId && <span aria-current="page">Event detail</span>}
+          </nav>
           <span>{user.full_name}</span>
           <button className="secondary" onClick={signOut}>
             Sign out
@@ -598,10 +775,14 @@ export default function App(): React.JSX.Element {
       </header>
 
       {selectedEventId ? (
-        <EventDetail eventId={selectedEventId} onBack={() => setSelectedEventId(null)} />
+        <EventDetail
+          eventId={selectedEventId}
+          onBack={() => setSelectedEventId(null)}
+          roles={user.roles}
+        />
       ) : (
         <EventQueue onOpen={setSelectedEventId} />
       )}
     </div>
-  )
+  );
 }

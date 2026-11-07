@@ -24,8 +24,8 @@ status check on `main`.
 
 | Check | Scope | Failure threshold |
 | --- | --- | --- |
-| Gitleaks | Complete reachable Git history (`fetch-depth: 0`) | Any detected secret |
-| `pip-audit --skip-editable` | Installed backend test/runtime dependency set | Any known advisory or skipped distribution other than the unpublished first-party package |
+| Gitleaks | Push/PR commit range from a complete checkout (`fetch-depth: 0`) | Any detected secret |
+| `pip-audit --requirement` | Frozen backend test/runtime dependency set, captured before installing the auditor | Any known advisory or skipped distribution |
 | `npm audit --audit-level=high` | Frontend runtime and development dependency set | High or critical advisory |
 | Trivy | Built backend and frontend production images; OS and language packages | High or critical advisory, including unfixed findings |
 
@@ -39,16 +39,23 @@ Until a reviewed lock file is introduced, CI audits the exact resolved
 environment on every run.  A future lock-file migration must add a
 `uv lock --check` gate and update this document.
 
-The local editable `sentineliq-backend` project is intentionally unpublished.
-`pip-audit --strict --skip-editable` treats that expected skip as a fatal error,
-so CI validates the JSON report and allows exactly that one skip. All resolved
-third-party dependencies remain in scope; vulnerability-database errors and
-known advisories still fail the command.
+CI snapshots `pip freeze --exclude-editable` before installing `pip-audit`, then
+audits that requirements file in strict mode. This excludes the unpublished editable
+`sentineliq-backend` project and prevents the auditor's own transitive
+dependencies from being misreported as application dependencies. The JSON
+report is checked to ensure the audit inspected a non-empty set and skipped no
+distributions. Dependency-collection errors, vulnerability-database errors, and
+known advisories fail CI.
+The CI toolchain pins `uv==0.13.7` and upgrades the runner's setuptools to
+`84.1.0`; these versions remediate advisories found by the initial PR CI run.
 
 JWT handling uses PyJWT with the configured algorithm explicitly allow-listed.
 This removes the affected `python-jose` and transitive `ecdsa` distributions.
 
 Actions are release-version pinned rather than referenced through `latest`.
+Gitleaks v3 runs on the supported Node 24 action runtime; its job receives only
+read access to repository contents and pull-request metadata, with PR comments
+disabled.
 For higher-assurance deployments, renovate/dependabot plus commit-SHA action
 pinning can be added once an automated update owner is in place.
 

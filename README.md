@@ -44,7 +44,9 @@ gate reports retain their original labels; the
 | 14 | Coordinator and end-to-end agent workflow | ⚠️ Partial — backend workflow passes on EC2; live Coordinator import/invocation unverified |
 | 15 | Human-review workflow | ✅ Backend APIs implemented |
 | 16 | Operator dashboard foundation | 🟡 Implementation complete on EC2; strict completion awaits CI and merge |
-| 17–48 | Remaining MVP and production gates | 🔲 Pending |
+| 17 | Event decision interface | ✅ Complete |
+| 18 | Audit and history interface | ✅ Complete |
+| 19–48 | Remaining MVP and production gates | 🔲 Pending |
 
 **Latest EC2 candidate validation:** 537 backend tests passed at 90.39% coverage
 under the production-floor Python 3.11 runtime with greenlet-aware tracing;

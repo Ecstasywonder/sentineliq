@@ -46,7 +46,8 @@ gate reports retain their original labels; the
 | 16 | Operator dashboard foundation | 🟡 Implementation complete on EC2; strict completion awaits CI and merge |
 | 17–48 | Remaining MVP and production gates | 🔲 Pending |
 
-**Latest EC2 candidate validation:** 533 backend tests passed at 90.48% coverage;
+**Latest EC2 candidate validation:** 537 backend tests passed at 90.39% coverage
+under the production-floor Python 3.11 runtime with greenlet-aware tracing;
 Ruff check and format passed across 114 Python files. Frontend format, type
 check, lint, 14 unit tests, production build, and same-origin container proxy
 smoke test passed. Production dependency audit found zero
@@ -57,7 +58,7 @@ audit. Fresh and legacy-stamp PostgreSQL migration paths reached Alembic head
 [Gate 14/16 completion evidence](docs/gate-14-16-completion.md).
 
 **Current focus:** close live Orchestrate Coordinator import/invocation evidence
-for Gate 14, then validate in CI and merge the pushed candidate changes before
+for Gate 14, then pass the final CI gate and merge the reviewed candidate before
 marking strict gate completion.
 
 ---

@@ -151,9 +151,7 @@ class TestUnavailableScheduleSystem:
         # access control is unaffected
         assert result.access_events is not None
 
-    async def test_multiple_sources_can_fail_simultaneously(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_multiple_sources_can_fail_simultaneously(self, db_session: AsyncSession) -> None:
         """Two adapters can fail at once; all errors are independently captured."""
         agg = EvidenceAggregator(db_session)
         with (
@@ -233,9 +231,7 @@ class TestUnavailableLLM:
         # Must have fallen through to deterministic
         assert result.source == "deterministic_fallback"
 
-    async def test_triage_result_never_contains_risk_score(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_triage_result_never_contains_risk_score(self, db_session: AsyncSession) -> None:
         """ADR-003: LLM never produces risk scores. TriageResult has no risk field."""
         svc = TriageService(db_session)
         result = await svc.run("evt-no-risk", _event_meta())
@@ -363,7 +359,9 @@ class TestContradictoryEvidence:
             source="deterministic_fallback",
         )
         svc = ContextService(db_session)
-        ctx = await svc.run("evt-ctx-safe", event_metadata=_event_meta(), triage_result=triage, evidence=evidence)
+        ctx = await svc.run(
+            "evt-ctx-safe", event_metadata=_event_meta(), triage_result=triage, evidence=evidence
+        )
         assert ctx is not None
 
 
@@ -442,9 +440,7 @@ class TestTimeout:
         assert result.access_events is None
         assert "access_events" in result.errors
 
-    async def test_triage_timeout_falls_to_deterministic(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_triage_timeout_falls_to_deterministic(self, db_session: AsyncSession) -> None:
         """A TimeoutException during TriageService Path A causes fallthrough to Path 0."""
         svc = TriageService(db_session)
         with patch.object(
@@ -512,9 +508,7 @@ class TestStaleSource:
         assert stale_record.status == "degraded"
         assert stale_record.consecutive_failures == 5
 
-    async def test_stale_source_does_not_prevent_assessment(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_stale_source_does_not_prevent_assessment(self, db_session: AsyncSession) -> None:
         """Stale integration health records do not block the evidence gather call."""
         stale = IntegrationHealth(
             id=_uid(),
@@ -622,8 +616,12 @@ class TestDuplicateEvent:
             "event_timestamp": "2026-01-01T13:00:00Z",
             "location_id": "DUP-LOC-004",
         }
-        resp1 = await client.post("/api/v1/events", json={**base, "provider_event_id": f"uniq-a-{_uid()}"})
-        resp2 = await client.post("/api/v1/events", json={**base, "provider_event_id": f"uniq-b-{_uid()}"})
+        resp1 = await client.post(
+            "/api/v1/events", json={**base, "provider_event_id": f"uniq-a-{_uid()}"}
+        )
+        resp2 = await client.post(
+            "/api/v1/events", json={**base, "provider_event_id": f"uniq-b-{_uid()}"}
+        )
         assert resp1.status_code == 201
         assert resp2.status_code == 201
         assert resp1.json()["id"] != resp2.json()["id"]
@@ -635,17 +633,35 @@ class TestDuplicateEvent:
 
 
 class TestSafeDegradationInvariants:
-    async def test_all_sources_failing_still_returns_bundle(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_all_sources_failing_still_returns_bundle(self, db_session: AsyncSession) -> None:
         """Even if all 4 adapters fail, gather() returns an AggregatedEvidence
         with errors populated — never raises."""
         agg = EvidenceAggregator(db_session)
         with (
-            patch.object(agg._access, "get_access_events", new_callable=AsyncMock, side_effect=RuntimeError("access")),
-            patch.object(agg._schedule, "get_schedule", new_callable=AsyncMock, side_effect=RuntimeError("schedule")),
-            patch.object(agg._work_order, "get_work_orders", new_callable=AsyncMock, side_effect=RuntimeError("wo")),
-            patch.object(agg._delivery, "get_deliveries", new_callable=AsyncMock, side_effect=RuntimeError("delivery")),
+            patch.object(
+                agg._access,
+                "get_access_events",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("access"),
+            ),
+            patch.object(
+                agg._schedule,
+                "get_schedule",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("schedule"),
+            ),
+            patch.object(
+                agg._work_order,
+                "get_work_orders",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("wo"),
+            ),
+            patch.object(
+                agg._delivery,
+                "get_deliveries",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("delivery"),
+            ),
         ):
             result = await agg.gather("evt-all-fail", _LOC)
 

@@ -125,7 +125,7 @@ class TestUnavailableAccessSystem:
 
         # Build source statuses the same way AssessmentService does
         source_statuses = _build_source_statuses(evidence)
-        available = sum(1 for s in source_statuses if s.status == "available")
+        available = sum(1 for s in source_statuses if s.available)
         total = len(source_statuses)
         assert available < total, "Available sources should be less than total when one fails"
 
@@ -288,7 +288,7 @@ class TestMissingHistory:
         source_statuses = _build_source_statuses(evidence)
         engine = ConfidenceEngine()
         confidence = engine.assess(source_statuses)
-        assert confidence.score < 1.0
+        assert confidence.confidence_score < 1.0
         assert any(r.reason for r in confidence.reductions)
 
 
@@ -334,7 +334,7 @@ class TestContradictoryEvidence:
         ctx = await ctx_svc.run(
             "evt-conflict",
             event_metadata=_event_meta(event_timestamp="2026-01-01T03:00:00Z"),
-            triage_result=triage,
+            required_context=triage.required_context,
             evidence=evidence,
         )
 
@@ -360,7 +360,10 @@ class TestContradictoryEvidence:
         )
         svc = ContextService(db_session)
         ctx = await svc.run(
-            "evt-ctx-safe", event_metadata=_event_meta(), triage_result=triage, evidence=evidence
+            "evt-ctx-safe",
+            event_metadata=_event_meta(),
+            required_context=triage.required_context,
+            evidence=evidence,
         )
         assert ctx is not None
 
@@ -487,7 +490,7 @@ class TestStaleSource:
             source_id="legacy_badge_system",
             name="Legacy Badge Reader",
             status="degraded",
-            last_checked_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+            last_checked_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC).isoformat(),
             consecutive_failures=5,
             error_message="Connection reset by peer",
             adapter_class="LegacyBadgeAdapter",
@@ -515,7 +518,7 @@ class TestStaleSource:
             source_id="stale_camera_system",
             name="Camera VMS",
             status="unavailable",
-            last_checked_at=datetime(2025, 6, 1, tzinfo=UTC),
+            last_checked_at=datetime(2025, 6, 1, tzinfo=UTC).isoformat(),
             consecutive_failures=100,
             adapter_class="VMSAdapter",
         )
@@ -704,7 +707,7 @@ class TestSafeDegradationInvariants:
         conf_full = engine.assess(_build_source_statuses(evidence_full))
         conf_fail = engine.assess(_build_source_statuses(evidence_fail))
 
-        assert conf_fail.score <= conf_full.score, (
+        assert conf_fail.confidence_score <= conf_full.confidence_score, (
             "Confidence must not increase when evidence is missing"
         )
 
@@ -737,8 +740,5 @@ def _build_source_statuses(evidence) -> list[SourceStatus]:
     }
     for field, section in field_map.items():
         source_id = _SOURCE_ID_MAP.get(field, field)
-        if section is None:
-            statuses.append(SourceStatus(source_id=source_id, status="unavailable"))
-        else:
-            statuses.append(SourceStatus(source_id=source_id, status="available"))
+        statuses.append(SourceStatus(source_id=source_id, available=section is not None))
     return statuses

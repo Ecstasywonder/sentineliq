@@ -58,7 +58,9 @@ services:
       - sentineliq-net
 
   # ---------------------------------------------------------------------------
-  # Frontend — React + Vite (dev mode)
+  # Frontend — production SPA served by Nginx.  Nginx proxies /api/ to the
+  # backend over the private Compose network, keeping browser traffic
+  # same-origin without baking a container hostname into the Vite bundle.
   # ---------------------------------------------------------------------------
   frontend:
     build:
@@ -66,10 +68,8 @@ services:
       dockerfile: ../infra/docker/Dockerfile.frontend
     container_name: sentineliq-frontend
     restart: unless-stopped
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
     ports:
-      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:8080"
     depends_on:
       backend:
         condition: service_healthy

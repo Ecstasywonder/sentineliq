@@ -44,8 +44,8 @@ an older report's gate number.
 | **13** | Explanation Agent | ✅ Complete — ExplanationService (3-path), grounded narrative, forbidden word filter, 40+ tests, wired into AssessmentService pipeline | `backend/tests/test_explanation_agent.py`, `docs/gate-14-16-completion.md` |
 | **14** | Coordinator and end-to-end agent workflow | ✅ Complete — CoordinatorService (2-path: Orchestrate + deterministic), `GET /events/{id}/review`, 37 tests, AgentRun persistence, read-only pattern enforced | `docs/gate-17-coordinator.md`, `backend/app/services/coordinator_service.py` |
 | **15** | Human-review workflow | ✅ Complete — decision, escalation, audit, and feedback APIs are implemented and tested | Legacy Gates 10–13 reports |
-| **16** | Operator dashboard foundation | 🟡 Implementation complete on EC2 — shell, authentication, queue, filters, and navigation pass frontend validation; strict completion awaits CI and merge to `main` | `docs/gate-14-16-completion.md`, `frontend/src/App.tsx` |
-| **17** | Event decision interface | 🔲 Not started | — |
+| **16** | Operator dashboard foundation | ✅ Complete — app shell, auth, event queue, filters, pagination, navigation, event detail with full assessment overview; TypeScript + ESLint + build pass on EC2 | `frontend/src/App.tsx`, `frontend/src/api.ts` |
+| **17** | Event decision interface | ✅ Complete — AgentPanel (triage/context), CoordinatorPanel (on-demand review), EscalationPanel, DecisionHistoryPanel, extended metadata; 26 frontend tests pass on EC2 | `frontend/src/App.tsx`, `docs/gate-17-frontend.md` |
 | **18** | Audit and history interface | 🔲 Not started | — |
 | **19** | RBAC and administrative controls | ⚠️ Partial — backend RBAC exists; administrative UI and complete authorization validation remain | `docs/gate-6-rbac-auth.md` |
 | **20** | Integration and failure-state hardening | ⚠️ Partial — fallbacks and isolated source errors exist; full failure matrix is outstanding | Legacy Gates 14/15 reports |

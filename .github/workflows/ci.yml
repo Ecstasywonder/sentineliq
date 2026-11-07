@@ -185,7 +185,7 @@ jobs:
         run: docker build --pull --tag sentineliq-backend:ci -f infra/docker/Dockerfile.backend backend
 
       - name: Scan backend production image
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: sentineliq-backend:ci
           format: table
@@ -198,7 +198,7 @@ jobs:
         run: docker build --pull --tag sentineliq-frontend:ci -f infra/docker/Dockerfile.frontend frontend
 
       - name: Scan frontend production image
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: sentineliq-frontend:ci
           format: table

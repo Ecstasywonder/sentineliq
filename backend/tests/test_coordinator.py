@@ -189,9 +189,7 @@ class TestDeterministicFallback:
         assert "person_detected" in result.summary
         assert _LOC in result.summary
 
-    async def test_fallback_summary_includes_risk_level(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_fallback_summary_includes_risk_level(self, db_session: AsyncSession) -> None:
         evt = await _make_event(db_session)
         await _make_assessment(db_session, evt.id)
 
@@ -265,9 +263,7 @@ class TestParseAndValidate:
         assert result.assessment_ready is True
         assert result.source == "orchestrate"
 
-    async def test_event_id_always_overridden_by_server(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_event_id_always_overridden_by_server(self, db_session: AsyncSession) -> None:
         """Prompt-injection defence: event_id from agent is discarded."""
         svc = self._svc(db_session)
         payload = {
@@ -282,9 +278,7 @@ class TestParseAndValidate:
         )
         assert result.event_id == "real-event-id"
 
-    async def test_human_review_required_forced_true(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_human_review_required_forced_true(self, db_session: AsyncSession) -> None:
         """ADR-006: human_review_required is ALWAYS True."""
         svc = self._svc(db_session)
         payload = {
@@ -294,9 +288,7 @@ class TestParseAndValidate:
             "missing_evidence": [],
             "human_review_required": True,  # schema requires True
         }
-        result = svc._parse_and_validate(
-            "evt-1", json.dumps(payload), _uid(), source="orchestrate"
-        )
+        result = svc._parse_and_validate("evt-1", json.dumps(payload), _uid(), source="orchestrate")
         assert result.human_review_required is True
 
     async def test_non_json_raises_value_error(self, db_session: AsyncSession) -> None:
@@ -354,9 +346,7 @@ class TestParseAndValidate:
 
 
 class TestCoordinatorServiceRun:
-    async def test_run_uses_fallback_in_test_env(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_run_uses_fallback_in_test_env(self, db_session: AsyncSession) -> None:
         """APP_ENV=test → orchestrate_active=False → deterministic fallback."""
         evt = await _make_event(db_session)
         await _make_assessment(db_session, evt.id)
@@ -376,10 +366,10 @@ class TestCoordinatorServiceRun:
         await svc.run(evt.id)
 
         rows = (
-            await db_session.execute(
-                select(AgentRun).where(AgentRun.event_id == evt.id)
-            )
-        ).scalars().all()
+            (await db_session.execute(select(AgentRun).where(AgentRun.event_id == evt.id)))
+            .scalars()
+            .all()
+        )
         assert len(rows) >= 1
         assert rows[0].agent_name == "sentinel_coordinator"
 
@@ -392,8 +382,10 @@ class TestCoordinatorServiceRun:
 
         svc = CoordinatorService(db_session)
         with patch.object(
-            svc, "_invoke_orchestrate", new_callable=AsyncMock,
-            side_effect=RuntimeError("Orchestrate unavailable")
+            svc,
+            "_invoke_orchestrate",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Orchestrate unavailable"),
         ):
             result = await svc.run(evt.id)
 
@@ -449,18 +441,14 @@ class TestCoordinatorAPI:
 
         assert resp.status_code == 409
 
-    async def test_409_closed_status(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_409_closed_status(self, client: AsyncClient, db_session: AsyncSession) -> None:
         evt = await _make_event(db_session, status="closed")
 
         resp = await client.get(f"/api/v1/events/{evt.id}/review")
 
         assert resp.status_code == 409
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get("/api/v1/events/nonexistent-event-id-xyz/review")
 
         assert resp.status_code == 404
@@ -515,9 +503,7 @@ class TestCoordinatorAPI:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         evt = await _make_event(db_session, status="awaiting_review")
-        await _make_assessment(
-            db_session, evt.id, evidence_errors={"mock_schedule": "timeout"}
-        )
+        await _make_assessment(db_session, evt.id, evidence_errors={"mock_schedule": "timeout"})
 
         resp = await client.get(f"/api/v1/events/{evt.id}/review")
 

@@ -62,9 +62,7 @@ async def get_coordinator_review(
     Only events in ``awaiting_review`` or ``escalated`` status may be reviewed.
     """
     # --- Load event -----------------------------------------------------------
-    result = await db.execute(
-        select(SecurityEvent).where(SecurityEvent.id == event_id)
-    )
+    result = await db.execute(select(SecurityEvent).where(SecurityEvent.id == event_id))
     event: SecurityEvent | None = result.scalar_one_or_none()
 
     if event is None:

@@ -60,9 +60,7 @@ async def _load_user_or_404(session: AsyncSession, user_id: str) -> User:
 
 
 async def _roles_for_user(session: AsyncSession, user_id: str) -> list[UserRole]:
-    result = await session.execute(
-        select(UserRole).where(UserRole.user_id == user_id)
-    )
+    result = await session.execute(select(UserRole).where(UserRole.user_id == user_id))
     return list(result.scalars().all())
 
 
@@ -145,9 +143,7 @@ async def create_user(
     session: AsyncSession = Depends(get_db),
 ) -> UserDetailResponse:
     # Email uniqueness check
-    existing = await session.execute(
-        select(User).where(User.email == body.email.lower())
-    )
+    existing = await session.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -220,9 +216,7 @@ async def get_user(
     for ur in user_roles:
         role: Role | None = await session.get(Role, ur.role_id)
         if role:
-            role_summaries.append(
-                UserRoleSummary(role=role.name, granted_by=ur.granted_by)
-            )
+            role_summaries.append(UserRoleSummary(role=role.name, granted_by=ur.granted_by))
 
     return UserDetailResponse(
         id=user.id,
@@ -266,9 +260,7 @@ async def update_user(
     for ur in user_roles:
         role: Role | None = await session.get(Role, ur.role_id)
         if role:
-            role_summaries.append(
-                UserRoleSummary(role=role.name, granted_by=ur.granted_by)
-            )
+            role_summaries.append(UserRoleSummary(role=role.name, granted_by=ur.granted_by))
 
     return UserDetailResponse(
         id=user.id,

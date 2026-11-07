@@ -285,9 +285,7 @@ class CoordinatorService:
 
         # Security: override event_id; enforce human_review_required
         safe_summary = self._sanitise_summary(str(output.summary)[:1024])
-        safe_missing = [
-            str(item)[:256] for item in output.missing_evidence[:64]
-        ]
+        safe_missing = [str(item)[:256] for item in output.missing_evidence[:64]]
 
         return CoordinatorReview(
             event_id=event_id,  # server-side value — never trust agent

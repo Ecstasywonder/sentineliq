@@ -210,9 +210,7 @@ async def test_list_users_includes_roles(
 
     resp = await admin_client.get("/api/v1/admin/users")
     assert resp.status_code == 200
-    user_item = next(
-        (u for u in resp.json()["items"] if u["email"] == email), None
-    )
+    user_item = next((u for u in resp.json()["items"] if u["email"] == email), None)
     assert user_item is not None
     assert "supervisor" in user_item["roles"]
 
@@ -232,7 +230,12 @@ async def test_create_user_happy_path(
 
     resp = await admin_client.post(
         "/api/v1/admin/users",
-        json={"email": email, "full_name": "New Officer", "password": "password123", "roles": ["officer"]},
+        json={
+            "email": email,
+            "full_name": "New Officer",
+            "password": "password123",
+            "roles": ["officer"],
+        },
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -282,7 +285,11 @@ async def test_create_user_no_roles(
 ) -> None:
     resp = await admin_client.post(
         "/api/v1/admin/users",
-        json={"email": f"noroles_{_id()[:8]}@test.com", "full_name": "No Roles", "password": "password123"},
+        json={
+            "email": f"noroles_{_id()[:8]}@test.com",
+            "full_name": "No Roles",
+            "password": "password123",
+        },
     )
     assert resp.status_code == 201
     assert resp.json()["roles"] == []

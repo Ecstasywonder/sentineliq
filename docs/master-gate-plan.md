@@ -46,7 +46,7 @@ an older report's gate number.
 | **15** | Human-review workflow | ✅ Complete — decision, escalation, audit, and feedback APIs are implemented and tested | Legacy Gates 10–13 reports |
 | **16** | Operator dashboard foundation | ✅ Complete — app shell, auth, event queue, filters, pagination, navigation, event detail with full assessment overview; TypeScript + ESLint + build pass on EC2 | `frontend/src/App.tsx`, `frontend/src/api.ts` |
 | **17** | Event decision interface | ✅ Complete — AgentPanel (triage/context), CoordinatorPanel (on-demand review), EscalationPanel, DecisionHistoryPanel, extended metadata; 26 frontend tests pass on EC2 | `frontend/src/App.tsx`, `docs/gate-17-frontend.md` |
-| **18** | Audit and history interface | 🔲 Not started | — |
+| **18** | Audit and history interface | ✅ Complete — `EventAuditPanel`, `EscalationDetailPanel`, `RiskPolicyPanel`, `AuditPage`, `DecisionHistoryPanel`, 13 unit tests, audit CSS | `docs/gate-18-audit-history.md`, `frontend/src/App.tsx` |
 | **19** | RBAC and administrative controls | ⚠️ Partial — backend RBAC exists; administrative UI and complete authorization validation remain | `docs/gate-6-rbac-auth.md` |
 | **20** | Integration and failure-state hardening | ⚠️ Partial — fallbacks and isolated source errors exist; full failure matrix is outstanding | Legacy Gates 14/15 reports |
 | **21** | Evaluation framework | 🔲 Not started | `evaluations/` placeholders |

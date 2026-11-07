@@ -47,12 +47,12 @@ from typing import Any
 
 import httpx
 import structlog
+from pydantic import ValidationError
 
 from app.config import get_settings
 from app.models.agent_run import AgentRun, ToolCall
-from pydantic import ValidationError
-
 from app.schemas.explanation import ExplanationAgentOutput, ExplanationResult, WhyReason
+from app.services.orchestrate_client import OrchestrateClient, validate_watsonx_base_url
 
 logger = structlog.get_logger(__name__)
 
@@ -60,7 +60,6 @@ logger = structlog.get_logger(__name__)
 # Endpoint constants (shared with TriageService / ContextService)
 # ---------------------------------------------------------------------------
 
-_ORCHESTRATE_AGENT_RUN_PATH = "/v1/agents/{agent_id}/run"
 _WATSONX_CHAT_PATH = "/ml/v1/text/chat"
 _WATSONX_CHAT_VERSION = "2024-09-16"
 _IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
@@ -380,41 +379,17 @@ class ExplanationService:
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
         settings = self._settings
-        base_url = settings.orchestrate_url.rstrip("/")
-        agent_id = settings.orchestrate_explanation_agent_id
-        url = f"{base_url}{_ORCHESTRATE_AGENT_RUN_PATH.format(agent_id=agent_id)}"
-
-        headers = {
-            "Authorization": f"ZenApiKey {settings.effective_watsonx_api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {"input": json.dumps(input_payload, default=str)}
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            t0 = time.monotonic()
-            response = await client.post(url, headers=headers, json=payload)
-            call_ms = (time.monotonic() - t0) * 1000
-            response.raise_for_status()
-
-        data = response.json()
-        tool_calls = [
-            {
-                "tool_name": "orchestrate_agent_run",
-                "status": "success",
-                "duration_ms": call_ms,
-                "sequence": 0,
-            }
-        ]
-
-        content = data.get("output") or data.get("content") or ""
-        if not content:
-            choices = data.get("choices") or []
-            if choices:
-                content = (choices[0].get("message") or {}).get("content", "")
-        if not content:
-            raise ValueError(f"Orchestrate response had no usable content. keys={list(data)}")
-
-        return content, tool_calls
+        client = OrchestrateClient(
+            base_url=settings.orchestrate_url,
+            api_key=settings.effective_orchestrate_api_key,
+            timeout=timeout,
+            api_version=settings.orchestrate_api_version,
+        )
+        return await client.chat(
+            agent_id=settings.orchestrate_explanation_agent_id,
+            system_prompt=_EXPLANATION_SYSTEM_PROMPT,
+            input_payload=self._compact_payload_for_llm(input_payload),
+        )
 
     # ------------------------------------------------------------------
     # PATH A — watsonx.ai Chat API
@@ -426,7 +401,7 @@ class ExplanationService:
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
         settings = self._settings
-        base_url = settings.effective_watsonx_base_url.rstrip("/")
+        base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
 
         iam_token = await self._get_iam_token(settings.effective_watsonx_api_key, timeout)
         headers = {
@@ -532,7 +507,7 @@ class ExplanationService:
             "confidence_score": confidence_score,
             "confidence_level": confidence_level,
             # Error messages are provider-controlled and are not model input.
-            "evidence_errors": {source: "unavailable" for source in evidence_errors},
+            "evidence_errors": dict.fromkeys(evidence_errors, "unavailable"),
             "evidence_references": self._build_evidence_references(evidence),
         }
 
@@ -765,7 +740,13 @@ class ExplanationService:
         # recommended_action — sanitise
         rec_action = self._sanitise_text(data["recommended_action"], max_len=512)
         operator_text = " ".join(
-            [summary, rec_action, *missing, *limitations, *(reason.text for reason in validated_why)]
+            [
+                summary,
+                rec_action,
+                *missing,
+                *limitations,
+                *(reason.text for reason in validated_why),
+            ]
         )
         if _ENFORCEMENT_ACTION_PATTERN.search(operator_text):
             logger.warning(

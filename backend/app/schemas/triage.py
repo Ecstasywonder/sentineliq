@@ -28,25 +28,29 @@ class TriageAgentOutput(BaseModel):
         "vehicle_event",
         "unclassified",
     ]
-    urgency_signals: list[Literal[
-        "after_hours",
-        "restricted_zone",
-        "forced_entry",
-        "no_camera_coverage",
-        "repeated_event",
-        "low_detector_confidence",
-        "missing_event_metadata",
-    ]]
-    required_context: list[Literal[
-        "access_control",
-        "schedule",
-        "location_policy",
-        "incident_history",
-        "work_orders",
-        "delivery_context",
-        "visitor_context",
-        "integration_health",
-    ]]
+    urgency_signals: list[
+        Literal[
+            "after_hours",
+            "restricted_zone",
+            "forced_entry",
+            "no_camera_coverage",
+            "repeated_event",
+            "low_detector_confidence",
+            "missing_event_metadata",
+        ]
+    ]
+    required_context: list[
+        Literal[
+            "access_control",
+            "schedule",
+            "location_policy",
+            "incident_history",
+            "work_orders",
+            "delivery_context",
+            "visitor_context",
+            "integration_health",
+        ]
+    ]
     triage_rationale: str = Field(min_length=1, max_length=512)
 
 

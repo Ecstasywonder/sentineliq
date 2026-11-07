@@ -33,6 +33,7 @@ from app.services.confidence_engine import (
 # _classify_confidence unit tests (pure, no DB, no async)
 # ---------------------------------------------------------------------------
 
+
 class TestClassifyConfidence:
     def test_score_1_0_is_high(self):
         assert _classify_confidence(1.0) == "high"
@@ -56,6 +57,7 @@ class TestClassifyConfidence:
 # ---------------------------------------------------------------------------
 # ConfidenceEngine tests (synchronous — no DB needed, ADR-004)
 # ---------------------------------------------------------------------------
+
 
 def _all_available(source_ids: list[str], required: bool = True) -> list[SourceStatus]:
     return [SourceStatus(source_id=s, available=True, required=required) for s in source_ids]
@@ -208,7 +210,8 @@ class TestToolRetrievalErrorReduction:
         result = engine.assess(sources=[], tool_retrieval_errors=["zzz_source", "aaa_source"])
 
         error_reductions = [
-            r for r in result.reductions
+            r
+            for r in result.reductions
             if r.reason == ConfidenceReduction.TOOL_RETRIEVAL_ERROR.value
         ]
         source_ids = [r.source_id for r in error_reductions]
@@ -319,9 +322,7 @@ class TestReductionsJsonRoundTrip:
 class TestCustomReductionAmounts:
     def test_custom_amount_overrides_default(self):
         """Constructor override changes the reduction amount for the specified reason."""
-        engine = ConfidenceEngine(
-            reduction_amounts={ConfidenceReduction.SOURCE_UNAVAILABLE: 0.05}
-        )
+        engine = ConfidenceEngine(reduction_amounts={ConfidenceReduction.SOURCE_UNAVAILABLE: 0.05})
         sources = [SourceStatus("access_control", available=False, required=True)]
         result = engine.assess(sources)
 
@@ -330,9 +331,7 @@ class TestCustomReductionAmounts:
 
     def test_unspecified_reasons_retain_defaults(self):
         """Only overridden reasons change; others keep their defaults."""
-        engine = ConfidenceEngine(
-            reduction_amounts={ConfidenceReduction.SOURCE_UNAVAILABLE: 0.05}
-        )
+        engine = ConfidenceEngine(reduction_amounts={ConfidenceReduction.SOURCE_UNAVAILABLE: 0.05})
         result = engine.assess(sources=[], llm_unavailable=True)
         # LLM reduction is still the default 0.20
         assert result.confidence_score == pytest.approx(0.80)

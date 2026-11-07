@@ -94,8 +94,7 @@ async def create_escalation(
             status_code=400,
             detail=ErrorDetail(
                 code="INVALID_PRIORITY",
-                message=f"Unknown priority '{body.priority}'. "
-                f"Valid: {sorted(VALID_PRIORITIES)}",
+                message=f"Unknown priority '{body.priority}'. Valid: {sorted(VALID_PRIORITIES)}",
             ).model_dump(),
         )
 

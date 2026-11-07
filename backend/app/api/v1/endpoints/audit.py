@@ -96,11 +96,7 @@ async def get_event_audit(
         )
 
     # Count
-    count_stmt = (
-        select(func.count())
-        .select_from(AuditEvent)
-        .where(AuditEvent.event_id == event_id)
-    )
+    count_stmt = select(func.count()).select_from(AuditEvent).where(AuditEvent.event_id == event_id)
     total: int = (await session.execute(count_stmt)).scalar_one()
 
     # Fetch page
@@ -172,8 +168,7 @@ async def get_global_audit(
             status_code=422,
             detail=ErrorDetail(
                 code="INVALID_ACTION",
-                message=f"Unknown action '{action}'. "
-                f"Valid: {sorted(AUDIT_ACTIONS)}",
+                message=f"Unknown action '{action}'. Valid: {sorted(AUDIT_ACTIONS)}",
             ).model_dump(),
         )
 
@@ -197,10 +192,7 @@ async def get_global_audit(
     total: int = (await session.execute(count_base)).scalar_one()
 
     stmt = (
-        base
-        .order_by(AuditEvent.occurred_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+        base.order_by(AuditEvent.occurred_at.desc()).offset((page - 1) * page_size).limit(page_size)
     )
     rows = list((await session.execute(stmt)).scalars().all())
     pages = max(1, math.ceil(total / page_size))

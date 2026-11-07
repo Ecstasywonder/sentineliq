@@ -32,13 +32,14 @@ for key in (
     os.environ.pop(key, None)
 
 from app.config import get_settings
+
+get_settings.cache_clear()
+settings = get_settings()
+
 from app.db.session import Base, get_db
 from app.main import app
 from app.models.user import User
 from app.security.dependencies import AuthenticatedUser, get_current_user
-
-get_settings.cache_clear()
-settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Use an in-memory SQLite database for tests to avoid requiring PostgreSQL
@@ -100,6 +101,11 @@ def _override_auth() -> AuthenticatedUser:
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Async test client with overridden DB session and stub auth."""
 
+    # The production limiter is intentionally process-scoped. Tests share the
+    # same ASGI app, so isolate each case's request budget to prevent unrelated
+    # suites from exhausting a single peer bucket.
+    await app.state.rate_limiter.reset()
+
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
@@ -110,4 +116,5 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         base_url="http://test",
     ) as ac:
         yield ac
+    await app.state.rate_limiter.reset()
     app.dependency_overrides.clear()

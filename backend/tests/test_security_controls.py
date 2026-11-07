@@ -78,9 +78,12 @@ async def test_sliding_window_limiter_blocks_and_recovers() -> None:
     blocked = await limiter.check("api", "peer:test", 2, now=102.0)
     recovered = await limiter.check("api", "peer:test", 2, now=161.1)
 
-    assert first.allowed and first.remaining == 1
-    assert second.allowed and second.remaining == 0
-    assert not blocked.allowed and blocked.retry_after == 58
+    assert first.allowed
+    assert first.remaining == 1
+    assert second.allowed
+    assert second.remaining == 0
+    assert not blocked.allowed
+    assert blocked.retry_after == 58
     assert recovered.allowed
 
 

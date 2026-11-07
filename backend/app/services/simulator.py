@@ -31,7 +31,8 @@ def load_scenarios() -> list[dict[str, Any]]:
     for scenario in scenarios:
         event = scenario.get("event")
         if not isinstance(event, dict) or not all(
-            event.get(field) for field in ("provider_event_id", "event_type", "event_timestamp", "location_id")
+            event.get(field)
+            for field in ("provider_event_id", "event_type", "event_timestamp", "location_id")
         ):
             raise ValueError(f"Scenario {scenario['id']} has an invalid event payload.")
         # Reuse the public ingestion contract so simulator fixtures cannot drift

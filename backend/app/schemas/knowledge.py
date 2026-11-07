@@ -35,4 +35,3 @@ class KnowledgeSearchMeta(BaseModel):
 class KnowledgeSearchResponse(BaseModel):
     meta: KnowledgeSearchMeta
     results: list[KnowledgeSearchResult]
-

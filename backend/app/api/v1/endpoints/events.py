@@ -46,7 +46,6 @@ from app.schemas.assessment import (
     RiskFactorDetail,
 )
 from app.schemas.context import ContextResultDetail
-from app.schemas.explanation import ExplanationResultDetail
 from app.schemas.events import (
     VALID_STATUSES,
     ErrorDetail,
@@ -54,6 +53,7 @@ from app.schemas.events import (
     EventListResponse,
     EventResponse,
 )
+from app.schemas.explanation import ExplanationResultDetail
 from app.schemas.triage import TriageResultDetail
 from app.security.dependencies import AuthenticatedUser, require_permission
 from app.services.assessment_service import AssessmentService
@@ -384,13 +384,15 @@ class StatusTransitionRequest(BaseModel):
     reason: str | None = None
 
 
-_DECISION_ONLY_STATUSES = frozenset({
-    "awaiting_review",
-    "context_incomplete",
-    "escalated",
-    "closed",
-    "dismissed",
-})
+_DECISION_ONLY_STATUSES = frozenset(
+    {
+        "awaiting_review",
+        "context_incomplete",
+        "escalated",
+        "closed",
+        "dismissed",
+    }
+)
 
 
 @router.patch(
@@ -462,20 +464,24 @@ async def update_event_status(
 
     prior_status = event.status
     event.status = body.status
-    session.add(AuditEvent(
-        id=_new_id(),
-        event_id=event_id,
-        action="event_status_transitioned",
-        actor=actor.email,
-        actor_role=actor.roles[0] if actor.roles else "unknown",
-        occurred_at=_now_iso(),
-        details_json=json.dumps({
-            "prior_status": prior_status,
-            "target_status": body.status,
-            "reason": body.reason,
-            "route": "PATCH /events/{id}/status",
-        }),
-    ))
+    session.add(
+        AuditEvent(
+            id=_new_id(),
+            event_id=event_id,
+            action="event_status_transitioned",
+            actor=actor.email,
+            actor_role=actor.roles[0] if actor.roles else "unknown",
+            occurred_at=_now_iso(),
+            details_json=json.dumps(
+                {
+                    "prior_status": prior_status,
+                    "target_status": body.status,
+                    "reason": body.reason,
+                    "route": "PATCH /events/{id}/status",
+                }
+            ),
+        )
+    )
     await session.flush()
 
     logger.info(
@@ -602,6 +608,7 @@ async def get_assessment(
     from sqlalchemy import select
 
     from app.models.assessment import ConfidenceAssessment, RiskAssessment
+    from app.models.recommendation import Recommendation
 
     # Verify event exists
     event: SecurityEvent | None = await session.get(SecurityEvent, event_id)
@@ -629,11 +636,13 @@ async def get_assessment(
         )
 
     # Load confidence assessment row
-    conf_stmt = select(ConfidenceAssessment).where(
-        ConfidenceAssessment.event_id == event_id
-    )
+    conf_stmt = select(ConfidenceAssessment).where(ConfidenceAssessment.event_id == event_id)
     conf_result = await session.execute(conf_stmt)
     conf_row: ConfidenceAssessment | None = conf_result.scalar_one_or_none()
+    recommendation_result = await session.execute(
+        select(Recommendation).where(Recommendation.event_id == event_id)
+    )
+    recommendation = recommendation_result.scalar_one_or_none()
 
     # Deserialise stored factor JSON
     risk_factors: list[RiskFactorDetail] = []
@@ -683,14 +692,24 @@ async def get_assessment(
         risk_score=risk_row.risk_score,
         risk_level=risk_row.risk_level,
         risk_factors=risk_factors,
-        confidence_score=conf_row.confidence_score if conf_row else risk_row.confidence_score or 0.0,
-        confidence_level=conf_row.confidence_level if conf_row else risk_row.confidence_level or "low",
+        confidence_score=conf_row.confidence_score
+        if conf_row
+        else risk_row.confidence_score or 0.0,
+        confidence_level=conf_row.confidence_level
+        if conf_row
+        else risk_row.confidence_level or "low",
         confidence_reductions=conf_reductions,
         sources_available=conf_row.sources_available if conf_row else 0,
         sources_required=conf_row.sources_required if conf_row else 0,
         triage=triage,
         context=context,
         explanation=explanation,
+        recommendation_id=recommendation.id if recommendation else None,
+        recommendation=(
+            AssessmentService._recommendation_detail(recommendation)
+            if recommendation is not None
+            else None
+        ),
         evidence_errors=evidence_errors,
         workflow_state=workflow_state,
         assessed_at=risk_row.assessed_at,

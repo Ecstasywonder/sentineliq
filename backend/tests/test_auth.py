@@ -23,11 +23,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
+from app.models.refresh_token import RefreshToken, RefreshTokenFamily
 from app.models.user import Role, User, UserRole
 from app.security.dependencies import AuthenticatedUser, get_current_user
 from app.security.passwords import hash_password, verify_password, verify_password_or_dummy
@@ -38,6 +40,7 @@ from app.security.tokens import (
     create_refresh_token,
     decode_access_token,
     decode_refresh_token,
+    decode_refresh_token_claims,
 )
 
 
@@ -151,9 +154,16 @@ class TestRbac:
 
     def test_platform_admin_has_all(self):
         perms = permissions_for_roles(["platform_admin"])
-        for p in ["events:read", "events:ingest", "events:decide",
-                  "events:override", "audit:read", "admin:users",
-                  "admin:policy", "admin:agents"]:
+        for p in [
+            "events:read",
+            "events:ingest",
+            "events:decide",
+            "events:override",
+            "audit:read",
+            "admin:users",
+            "admin:policy",
+            "admin:agents",
+        ]:
             assert p in perms, f"platform_admin missing {p}"
 
     def test_audit_reviewer_read_only(self):
@@ -352,6 +362,88 @@ async def test_refresh_token_replay_revokes_token_family(db_session: AsyncSessio
 
 
 @pytest.mark.asyncio
+async def test_logout_revokes_the_entire_refresh_token_family(
+    db_session: AsyncSession,
+) -> None:
+    """Logout with a rotated token invalidates its active descendant too."""
+    email = f"auth_logout_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        original = login_response.json()["refresh_token"]
+        refresh_response = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": original},
+        )
+        descendant = refresh_response.json()["refresh_token"]
+
+        logout_response = await ac.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": original},
+        )
+        descendant_after_logout = await ac.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": descendant},
+        )
+
+    app.dependency_overrides.clear()
+    assert logout_response.status_code == 204
+    assert descendant_after_logout.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_is_idempotent_and_does_not_enumerate_tokens(
+    db_session: AsyncSession,
+) -> None:
+    """Known, repeated, and malformed tokens all receive the same response."""
+    email = f"auth_logout_idempotent_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        refresh = login_response.json()["refresh_token"]
+        first = await ac.post("/api/v1/auth/logout", json={"refresh_token": refresh})
+
+        claims = decode_refresh_token_claims(refresh)
+        family = await db_session.scalar(
+            select(RefreshTokenFamily).where(
+                RefreshTokenFamily.family_id == claims.family_id,
+            )
+        )
+        assert family is not None
+        first_revoked_at = family.revoked_at
+        tokens = list(
+            (
+                await db_session.scalars(
+                    select(RefreshToken).where(RefreshToken.family_id == claims.family_id),
+                )
+            ).all()
+        )
+        assert tokens
+        assert all(token.revoked_at == first_revoked_at for token in tokens)
+
+        repeated = await ac.post("/api/v1/auth/logout", json={"refresh_token": refresh})
+        malformed = await ac.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": "not.a.refresh.token"},
+        )
+
+    app.dependency_overrides.clear()
+    assert [first.status_code, repeated.status_code, malformed.status_code] == [204, 204, 204]
+    await db_session.refresh(family)
+    assert family.revoked_at == first_revoked_at
+
+
+@pytest.mark.asyncio
 async def test_unregistered_signed_refresh_token_is_rejected(
     db_session: AsyncSession,
 ) -> None:
@@ -416,8 +508,12 @@ async def test_events_endpoint_forbidden_for_insufficient_role(
     """
     # Build a stub with audit_reviewer only
     stub_user = User(
-        id=_id(), email="limited@test.com", full_name="Limited",
-        hashed_password="x", is_active=True, is_verified=True,
+        id=_id(),
+        email="limited@test.com",
+        full_name="Limited",
+        hashed_password="x",
+        is_active=True,
+        is_verified=True,
     )
     limited_auth = AuthenticatedUser(user=stub_user, roles=["audit_reviewer"])
 

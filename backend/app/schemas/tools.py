@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 
 from app.schemas.knowledge import KnowledgeSearchResponse
 
-
 # ---------------------------------------------------------------------------
 # Shared
 # ---------------------------------------------------------------------------

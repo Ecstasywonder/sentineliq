@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.db.session import Base  # noqa: F401
 import app.models  # noqa: F401 — registers all tables with Base.metadata
 from app.config import get_settings
+from app.db.migration_compat import remap_legacy_assessment_revision
 
 # Alembic Config object
 config = context.config
@@ -75,6 +76,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # ``0002_assessment_reconstruction_bundle`` was released before its
+    # over-length revision identifier was found to exceed Alembic's default
+    # VARCHAR(32). Normalize that equivalent legacy stamp before Alembic tries
+    # to resolve it against the current revision graph.
+    with connection.begin():
+        remap_legacy_assessment_revision(connection)
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()

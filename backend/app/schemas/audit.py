@@ -18,7 +18,7 @@ class AuditEntryResponse(BaseModel):
     actor: str
     actor_role: str | None
     occurred_at: str
-    details: dict | None   # deserialised from details_json; None if not present
+    details: dict | None  # deserialised from details_json; None if not present
     redacted: bool
 
 

@@ -29,6 +29,7 @@ from app.schemas.knowledge import (
     KnowledgeSearchResponse,
     KnowledgeSearchResult,
 )
+from app.services.orchestrate_client import validate_watsonx_base_url
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _EMBEDDING_DIMENSIONS = 192
@@ -251,9 +252,7 @@ class KnowledgeRetrievalService:
             evidence_id=f"incident:{row.id}",
             source_type="incident",
             source_id=str(row.id),
-            title=self._bounded_text(
-                f"{row.incident_code}: {row.incident_type}", 256
-            ),
+            title=self._bounded_text(f"{row.incident_code}: {row.incident_type}", 256),
             content=content,
             prompt_injection_detected=self._has_instruction_text(content),
             relevance_score=round(relevance, 6),
@@ -330,14 +329,12 @@ class KnowledgeRetrievalService:
         settings = get_settings()
         if settings.enable_semantic_search and settings.watsonx_active:
             try:
+                base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
                 token = await self._watsonx_iam_token(
                     settings.effective_watsonx_api_key,
                     min(settings.agent_invoke_timeout, 15.0),
                 )
-                url = (
-                    f"{settings.effective_watsonx_base_url.rstrip('/')}"
-                    f"/ml/v1/text/embeddings?version={settings.watsonx_api_version}"
-                )
+                url = f"{base_url}/ml/v1/text/embeddings?version={settings.watsonx_api_version}"
                 vectors: list[list[float]] = []
                 async with httpx.AsyncClient(timeout=settings.agent_invoke_timeout) as client:
                     for offset in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
@@ -349,9 +346,7 @@ class KnowledgeRetrievalService:
                                 "Content-Type": "application/json",
                             },
                             json={
-                                "inputs": [
-                                    self._bounded_text(text, 2000) for text in batch
-                                ],
+                                "inputs": [self._bounded_text(text, 2000) for text in batch],
                                 "model_id": settings.watsonx_embedding_model_id,
                                 "space_id": settings.effective_watsonx_space_id,
                                 "parameters": {"truncate_input_tokens": 512},
@@ -360,18 +355,15 @@ class KnowledgeRetrievalService:
                         response.raise_for_status()
                         results = response.json().get("results") or []
                         if len(results) != len(batch):
-                            raise ValueError(
-                                "watsonx embeddings response cardinality was invalid"
-                            )
+                            raise ValueError("watsonx embeddings response cardinality was invalid")
                         vectors.extend(
-                            self._normalise_vector(item.get("embedding"))
-                            for item in results
+                            self._normalise_vector(item.get("embedding")) for item in results
                         )
                 if len(vectors) != len(texts) or any(not vector for vector in vectors):
                     raise ValueError("watsonx embeddings response cardinality was invalid")
                 self._embedding_provider = f"watsonx:{settings.watsonx_embedding_model_id}"
                 return vectors
-            except Exception as exc:  # noqa: BLE001 - retrieval must degrade safely
+            except Exception as exc:
                 logger.warning(
                     "knowledge_retrieval.embedding_fallback",
                     provider="watsonx",

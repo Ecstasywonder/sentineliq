@@ -33,11 +33,7 @@ class MockDeliveryAdapter(DeliveryAdapter):
         facility_id: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
-        stmt = (
-            select(Delivery)
-            .where(Delivery.location_id == location_id)
-            .limit(limit)
-        )
+        stmt = select(Delivery).where(Delivery.location_id == location_id).limit(limit)
         if facility_id:
             stmt = stmt.where(Delivery.facility_id == facility_id)
 
@@ -61,7 +57,7 @@ class MockDeliveryAdapter(DeliveryAdapter):
                 "error_message": None,
                 "adapter_class": f"{self.__class__.__module__}.{self.__class__.__name__}",
             }
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("delivery_health_check_failed", error=str(exc))
             return {
                 "source_id": self.source_id,

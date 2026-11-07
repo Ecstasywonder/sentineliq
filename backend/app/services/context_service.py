@@ -51,6 +51,7 @@ from app.schemas.context import (
     EvidenceConflict,
     SourceStatusRecord,
 )
+from app.services.orchestrate_client import OrchestrateClient, validate_watsonx_base_url
 
 logger = structlog.get_logger(__name__)
 
@@ -58,7 +59,6 @@ logger = structlog.get_logger(__name__)
 # Endpoint constants (shared with TriageService)
 # ---------------------------------------------------------------------------
 
-_ORCHESTRATE_AGENT_RUN_PATH = "/v1/agents/{agent_id}/run"
 _WATSONX_CHAT_PATH = "/ml/v1/text/chat"
 _WATSONX_CHAT_VERSION = "2024-09-16"
 _IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
@@ -67,23 +67,27 @@ _IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
 # Allowed source status values
 # ---------------------------------------------------------------------------
 
-_ALLOWED_STATUSES = frozenset({
-    "verified_present",
-    "verified_absent",
-    "unavailable",
-    "not_requested",
-})
+_ALLOWED_STATUSES = frozenset(
+    {
+        "verified_present",
+        "verified_absent",
+        "unavailable",
+        "not_requested",
+    }
+)
 
-_KNOWN_SOURCES = frozenset({
-    "access_control",
-    "schedule",
-    "location_policy",
-    "incident_history",
-    "work_orders",
-    "delivery_context",
-    "visitor_context",
-    "integration_health",
-})
+_KNOWN_SOURCES = frozenset(
+    {
+        "access_control",
+        "schedule",
+        "location_policy",
+        "incident_history",
+        "work_orders",
+        "delivery_context",
+        "visitor_context",
+        "integration_health",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # System prompt — mirrors agents/context/agent.yaml instructions
@@ -176,9 +180,7 @@ class ContextService:
         input_payload = {
             **self._normalise_event_metadata(event_metadata),
             "event_id": event_id,
-            "required_context": [
-                source for source in required_context if source in _KNOWN_SOURCES
-            ],
+            "required_context": [source for source in required_context if source in _KNOWN_SOURCES],
             "evidence": evidence_payload,
         }
 
@@ -190,63 +192,83 @@ class ContextService:
                     input_payload, effective_timeout
                 )
                 duration_ms = (time.monotonic() - t0) * 1000
-                result = self._parse_and_validate(event_id, raw, required_context,
-                                                   evidence, source="orchestrate")
+                result = self._parse_and_validate(
+                    event_id, raw, required_context, evidence, source="orchestrate"
+                )
                 result.agent_run_id = run_id
                 await self._persist_agent_run(
-                    run_id=run_id, event_id=event_id, started_at=started_at,
-                    status="success", duration_ms=duration_ms,
+                    run_id=run_id,
+                    event_id=event_id,
+                    started_at=started_at,
+                    status="success",
+                    duration_ms=duration_ms,
                     agent_version=settings.orchestrate_context_agent_id,
-                    path="orchestrate", tool_calls=[*attempt_records, *tool_calls],
+                    path="orchestrate",
+                    tool_calls=[*attempt_records, *tool_calls],
                 )
-                logger.info("context.path_b.success", event_id=event_id,
-                            has_conflicts=result.has_conflicts,
-                            missing=result.missing_sources,
-                            duration_ms=round(duration_ms, 1))
+                logger.info(
+                    "context.path_b.success",
+                    event_id=event_id,
+                    has_conflicts=result.has_conflicts,
+                    missing=result.missing_sources,
+                    duration_ms=round(duration_ms, 1),
+                )
                 return result
             except Exception as exc:
-                attempt_records.append({
-                    "tool_name": "orchestrate_agent_run",
-                    "status": "failed",
-                    "duration_ms": (time.monotonic() - attempt_started) * 1000,
-                    "error_message": str(exc)[:512],
-                })
+                attempt_records.append(
+                    {
+                        "tool_name": "orchestrate_chat_completion",
+                        "status": "failed",
+                        "duration_ms": (time.monotonic() - attempt_started) * 1000,
+                        "error_message": str(exc)[:512],
+                    }
+                )
                 attempt_errors.append(f"orchestrate: {str(exc)[:256]}")
-                logger.warning("context.path_b.failed", event_id=event_id,
-                               error=str(exc), fallthrough="path_a")
+                logger.warning(
+                    "context.path_b.failed", event_id=event_id, error=str(exc), fallthrough="path_a"
+                )
 
         # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
         if settings.watsonx_active:
             attempt_started = time.monotonic()
             try:
-                raw, tool_calls = await self._invoke_watsonx_ai(
-                    input_payload, effective_timeout
-                )
+                raw, tool_calls = await self._invoke_watsonx_ai(input_payload, effective_timeout)
                 duration_ms = (time.monotonic() - t0) * 1000
-                result = self._parse_and_validate(event_id, raw, required_context,
-                                                   evidence, source="watsonx_ai")
+                result = self._parse_and_validate(
+                    event_id, raw, required_context, evidence, source="watsonx_ai"
+                )
                 result.agent_run_id = run_id
                 await self._persist_agent_run(
-                    run_id=run_id, event_id=event_id, started_at=started_at,
-                    status="success", duration_ms=duration_ms,
+                    run_id=run_id,
+                    event_id=event_id,
+                    started_at=started_at,
+                    status="success",
+                    duration_ms=duration_ms,
                     agent_version=settings.watsonx_model_id,
-                    path="watsonx_ai", tool_calls=[*attempt_records, *tool_calls],
+                    path="watsonx_ai",
+                    tool_calls=[*attempt_records, *tool_calls],
                 )
-                logger.info("context.path_a.success", event_id=event_id,
-                            has_conflicts=result.has_conflicts,
-                            missing=result.missing_sources,
-                            duration_ms=round(duration_ms, 1))
+                logger.info(
+                    "context.path_a.success",
+                    event_id=event_id,
+                    has_conflicts=result.has_conflicts,
+                    missing=result.missing_sources,
+                    duration_ms=round(duration_ms, 1),
+                )
                 return result
             except Exception as exc:
-                attempt_records.append({
-                    "tool_name": "watsonx_chat",
-                    "status": "failed",
-                    "duration_ms": (time.monotonic() - attempt_started) * 1000,
-                    "error_message": str(exc)[:512],
-                })
+                attempt_records.append(
+                    {
+                        "tool_name": "watsonx_chat",
+                        "status": "failed",
+                        "duration_ms": (time.monotonic() - attempt_started) * 1000,
+                        "error_message": str(exc)[:512],
+                    }
+                )
                 attempt_errors.append(f"watsonx_ai: {str(exc)[:256]}")
-                logger.warning("context.path_a.failed", event_id=event_id,
-                               error=str(exc), fallthrough="path_0")
+                logger.warning(
+                    "context.path_a.failed", event_id=event_id, error=str(exc), fallthrough="path_0"
+                )
 
         # ---- PATH 0: Deterministic fallback ----------------------------------
         duration_ms = (time.monotonic() - t0) * 1000
@@ -256,14 +278,22 @@ class ContextService:
         result = self._deterministic_context(event_id, required_context, evidence)
         result.agent_run_id = run_id
         await self._persist_agent_run(
-            run_id=run_id, event_id=event_id, started_at=started_at,
-            status=path0_status, duration_ms=duration_ms,
+            run_id=run_id,
+            event_id=event_id,
+            started_at=started_at,
+            status=path0_status,
+            duration_ms=duration_ms,
             agent_version="deterministic_v1",
-            path="deterministic", tool_calls=attempt_records,
+            path="deterministic",
+            tool_calls=attempt_records,
             error_message=" | ".join(attempt_errors)[:512] or None,
         )
-        logger.info("context.path_0.used", event_id=event_id,
-                    missing=result.missing_sources, reason=path0_status)
+        logger.info(
+            "context.path_0.used",
+            event_id=event_id,
+            missing=result.missing_sources,
+            reason=path0_status,
+        )
         return result
 
     # ------------------------------------------------------------------
@@ -275,41 +305,21 @@ class ContextService:
         input_payload: dict[str, Any],
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
-        settings = self._settings
-        base_url = settings.orchestrate_url.rstrip("/")
-        agent_id = settings.orchestrate_context_agent_id
-        url = f"{base_url}{_ORCHESTRATE_AGENT_RUN_PATH.format(agent_id=agent_id)}"
-
-        headers = {
-            "Authorization": f"ZenApiKey {settings.effective_watsonx_api_key}",
-            "Content-Type": "application/json",
-        }
         # Orchestrate receives the same compact, allowlisted package as Path A.
         # Never send raw provider metadata or incident/policy narratives across
         # the model boundary.
-        payload = {"input": json.dumps(
-            self._compact_evidence_for_llm(input_payload), default=str
-        )}
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            t0 = time.monotonic()
-            response = await client.post(url, headers=headers, json=payload)
-            call_ms = (time.monotonic() - t0) * 1000
-            response.raise_for_status()
-
-        data = response.json()
-        tool_calls = [{"tool_name": "orchestrate_agent_run", "status": "success",
-                       "duration_ms": call_ms, "sequence": 0}]
-
-        content = data.get("output") or data.get("content") or ""
-        if not content:
-            choices = data.get("choices") or []
-            if choices:
-                content = (choices[0].get("message") or {}).get("content", "")
-        if not content:
-            raise ValueError(f"Orchestrate response had no usable content. keys={list(data)}")
-
-        return content, tool_calls
+        settings = self._settings
+        client = OrchestrateClient(
+            base_url=settings.orchestrate_url,
+            api_key=settings.effective_orchestrate_api_key,
+            timeout=timeout,
+            api_version=settings.orchestrate_api_version,
+        )
+        return await client.chat(
+            agent_id=settings.orchestrate_context_agent_id,
+            system_prompt=_CONTEXT_SYSTEM_PROMPT,
+            input_payload=self._compact_evidence_for_llm(input_payload),
+        )
 
     # ------------------------------------------------------------------
     # PATH A — watsonx.ai Chat API
@@ -321,7 +331,7 @@ class ContextService:
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
         settings = self._settings
-        base_url = settings.effective_watsonx_base_url.rstrip("/")
+        base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
 
         iam_token = await self._get_iam_token(settings.effective_watsonx_api_key, timeout)
         headers = {
@@ -348,8 +358,14 @@ class ContextService:
             response.raise_for_status()
 
         data = response.json()
-        tool_calls = [{"tool_name": "watsonx_chat", "status": "success",
-                       "duration_ms": call_ms, "sequence": 0}]
+        tool_calls = [
+            {
+                "tool_name": "watsonx_chat",
+                "status": "success",
+                "duration_ms": call_ms,
+                "sequence": 0,
+            }
+        ]
 
         choices = data.get("choices") or []
         if not choices:
@@ -365,8 +381,7 @@ class ContextService:
             resp = await client.post(
                 _IAM_TOKEN_URL,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={"grant_type": "urn:ibm:params:oauth:grant-type:apikey",
-                      "apikey": api_key},
+                data={"grant_type": "urn:ibm:params:oauth:grant-type:apikey", "apikey": api_key},
             )
             resp.raise_for_status()
         access_token = resp.json().get("access_token", "")
@@ -388,9 +403,7 @@ class ContextService:
         """Allowlist bounded event fields before an agent sees the payload."""
         return {
             "event_type": self._safe_scalar(event_metadata.get("event_type"), limit=64),
-            "event_timestamp": self._safe_scalar(
-                event_metadata.get("event_timestamp"), limit=40
-            ),
+            "event_timestamp": self._safe_scalar(event_metadata.get("event_timestamp"), limit=40),
             "location_id": self._safe_scalar(event_metadata.get("location_id"), limit=128),
             "facility_id": self._safe_scalar(event_metadata.get("facility_id"), limit=128),
             "zone": self._safe_scalar(event_metadata.get("zone"), limit=128),
@@ -423,11 +436,11 @@ class ContextService:
         }
 
         source_map = {
-            "access_control":   "access_events",
-            "schedule":         "schedule",
-            "work_orders":      "work_orders",
+            "access_control": "access_events",
+            "schedule": "schedule",
+            "work_orders": "work_orders",
             "delivery_context": "delivery",
-            "location_policy":  "location_policy",
+            "location_policy": "location_policy",
             "incident_history": "incident_history",
             "integration_health": "integration_health",
         }
@@ -447,9 +460,18 @@ class ContextService:
                     first_rec_summary = {
                         k: self._safe_scalar(v)
                         for k, v in r.items()
-                        if k in ("access_type", "access_granted", "schedule_type",
-                                 "status", "is_active", "rule_type", "severity",
-                                 "incident_type", "requires_after_hours")
+                        if k
+                        in (
+                            "access_type",
+                            "access_granted",
+                            "schedule_type",
+                            "status",
+                            "is_active",
+                            "rule_type",
+                            "severity",
+                            "incident_type",
+                            "requires_after_hours",
+                        )
                     }
             compact_evidence[ctx_name] = {
                 "source": meta.get("source"),
@@ -468,9 +490,7 @@ class ContextService:
                         "evidence_id": self._safe_scalar(item.get("evidence_id")),
                         "source_type": self._safe_scalar(item.get("source_type")),
                         "relevance_score": item.get("relevance_score"),
-                        "prompt_injection_detected": bool(
-                            item.get("prompt_injection_detected")
-                        ),
+                        "prompt_injection_detected": bool(item.get("prompt_injection_detected")),
                     }
                     for item in safe_results[:10]
                     if isinstance(item, dict)
@@ -513,9 +533,7 @@ class ContextService:
         """
         text = raw_output.strip()
         if text.startswith("```"):
-            text = "\n".join(
-                ln for ln in text.splitlines() if not ln.startswith("```")
-            ).strip()
+            text = "\n".join(ln for ln in text.splitlines() if not ln.startswith("```")).strip()
 
         try:
             data = json.loads(text)
@@ -548,14 +566,10 @@ class ContextService:
                 continue
             claimed = raw_statuses.get(requested_source)
             if not isinstance(claimed, dict):
-                raise ValueError(
-                    f"Context agent omitted required source '{requested_source}'."
-                )
+                raise ValueError(f"Context agent omitted required source '{requested_source}'.")
             expected = authoritative.source_statuses[requested_source]
             if claimed.get("status") != expected.status:
-                raise ValueError(
-                    f"Context agent contradicted evidence for '{requested_source}'."
-                )
+                raise ValueError(f"Context agent contradicted evidence for '{requested_source}'.")
             claimed_count = claimed.get("record_count")
             if claimed_count != expected.record_count:
                 raise ValueError(
@@ -565,9 +579,9 @@ class ContextService:
         claimed_missing = data.get("missing_sources")
         if not isinstance(claimed_missing, list):
             raise ValueError("Context agent missing_sources must be an array.")
-        filtered_claimed_missing = sorted({
-            item for item in claimed_missing if isinstance(item, str) and item in _KNOWN_SOURCES
-        })
+        filtered_claimed_missing = sorted(
+            {item for item in claimed_missing if isinstance(item, str) and item in _KNOWN_SOURCES}
+        )
         if filtered_claimed_missing != sorted(authoritative.missing_sources):
             raise ValueError("Context agent missing_sources contradicted retrieved evidence.")
 
@@ -581,9 +595,7 @@ class ContextService:
             for item in data["conflicts"]
             if item["source_a"] in _KNOWN_SOURCES and item["source_b"] in _KNOWN_SOURCES
         }
-        expected_conflicts = {
-            (item.source_a, item.source_b) for item in authoritative.conflicts
-        }
+        expected_conflicts = {(item.source_a, item.source_b) for item in authoritative.conflicts}
         if claimed_conflicts != expected_conflicts:
             raise ValueError("Context agent conflicts contradicted retrieved evidence.")
 
@@ -620,14 +632,14 @@ class ContextService:
         errors = evidence_dict.get("errors", {})
 
         source_map = {
-            "access_control":     "access_events",
-            "schedule":           "schedule",
-            "work_orders":        "work_orders",
-            "delivery_context":   "delivery",
-            "location_policy":    "location_policy",
-            "incident_history":   "incident_history",
+            "access_control": "access_events",
+            "schedule": "schedule",
+            "work_orders": "work_orders",
+            "delivery_context": "delivery",
+            "location_policy": "location_policy",
+            "incident_history": "incident_history",
             "integration_health": "integration_health",
-            "visitor_context":    None,
+            "visitor_context": None,
         }
 
         error_aliases = {
@@ -696,45 +708,57 @@ class ContextService:
 
         # Access granted but location is restricted
         if (
-            access_status and access_status.status == "verified_present"
-            and policy_status and policy_status.status == "verified_present"
+            access_status
+            and access_status.status == "verified_present"
+            and policy_status
+            and policy_status.status == "verified_present"
         ):
             # Check for access_granted and restricted rule in raw evidence
             access_records = (evidence_dict.get("access_events") or {}).get("records", [])
             policy_records = (evidence_dict.get("location_policy") or {}).get("records", [])
-            has_granted = any(r.get("access_granted") for r in access_records if isinstance(r, dict))
+            has_granted = any(
+                r.get("access_granted") for r in access_records if isinstance(r, dict)
+            )
             has_restricted = any(
-                r.get("rule_type") in ("after_hours_restriction", "access_restriction", "restricted_zone")
-                for r in policy_records if isinstance(r, dict)
+                r.get("rule_type")
+                in ("after_hours_restriction", "access_restriction", "restricted_zone")
+                for r in policy_records
+                if isinstance(r, dict)
             )
             if has_granted and has_restricted:
-                conflicts.append(EvidenceConflict(
-                    source_a="access_control",
-                    source_b="location_policy",
-                    description=(
-                        "A valid access event was found, but the location policy "
-                        "indicates restricted access rules apply. Further verification required."
-                    ),
-                ))
+                conflicts.append(
+                    EvidenceConflict(
+                        source_a="access_control",
+                        source_b="location_policy",
+                        description=(
+                            "A valid access event was found, but the location policy "
+                            "indicates restricted access rules apply. Further verification required."
+                        ),
+                    )
+                )
 
         # Badge access denied + no scheduled activity
         if (
-            access_status and access_status.status == "verified_present"
-            and schedule_status and schedule_status.status == "verified_absent"
+            access_status
+            and access_status.status == "verified_present"
+            and schedule_status
+            and schedule_status.status == "verified_absent"
         ):
             access_records = (evidence_dict.get("access_events") or {}).get("records", [])
             has_denied = any(
                 not r.get("access_granted") for r in access_records if isinstance(r, dict)
             )
             if has_denied:
-                conflicts.append(EvidenceConflict(
-                    source_a="access_control",
-                    source_b="schedule",
-                    description=(
-                        "An access-denied event was found, and no scheduled activity "
-                        "covers this location for the event time window."
-                    ),
-                ))
+                conflicts.append(
+                    EvidenceConflict(
+                        source_a="access_control",
+                        source_b="schedule",
+                        description=(
+                            "An access-denied event was found, and no scheduled activity "
+                            "covers this location for the event time window."
+                        ),
+                    )
+                )
 
         summary_parts = []
         present = [s for s, v in statuses.items() if v.status == "verified_present"]
@@ -790,30 +814,34 @@ class ContextService:
             # not poison the surrounding assessment when telemetry cannot be
             # written (for example, a duplicate run ID or storage outage).
             async with self._session.begin_nested():
-                self._session.add(AgentRun(
-                    id=run_id,
-                    event_id=event_id,
-                    agent_name="sentinel_context_agent",
-                    agent_version=agent_version,
-                    orchestrate_run_id=f"path:{path}",
-                    status=status,
-                    started_at=started_at,
-                    completed_at=completed_at,
-                    duration_ms=round(duration_ms, 2),
-                    error_message=error_message,
-                ))
-                for seq, tc in enumerate(tool_calls):
-                    self._session.add(ToolCall(
-                        id=str(uuid.uuid4()),
-                        agent_run_id=run_id,
-                        tool_name=tc.get("tool_name", "unknown"),
-                        status=tc.get("status", "success"),
+                self._session.add(
+                    AgentRun(
+                        id=run_id,
+                        event_id=event_id,
+                        agent_name="sentinel_context_agent",
+                        agent_version=agent_version,
+                        orchestrate_run_id=f"path:{path}",
+                        status=status,
                         started_at=started_at,
                         completed_at=completed_at,
-                        duration_ms=round(tc.get("duration_ms", 0.0), 2),
-                        sequence=seq,
-                        error_message=tc.get("error_message"),
-                    ))
+                        duration_ms=round(duration_ms, 2),
+                        error_message=error_message,
+                    )
+                )
+                for seq, tc in enumerate(tool_calls):
+                    self._session.add(
+                        ToolCall(
+                            id=str(uuid.uuid4()),
+                            agent_run_id=run_id,
+                            tool_name=tc.get("tool_name", "unknown"),
+                            status=tc.get("status", "success"),
+                            started_at=started_at,
+                            completed_at=completed_at,
+                            duration_ms=round(tc.get("duration_ms", 0.0), 2),
+                            sequence=seq,
+                            error_message=tc.get("error_message"),
+                        )
+                    )
                 await self._session.flush()
         except Exception as exc:
             logger.error(

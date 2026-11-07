@@ -40,12 +40,14 @@ def _uid() -> str:
 
 
 def _thresholds_json() -> str:
-    return json.dumps({
-        "low":      {"min": 0.0,  "max": 29.0},
-        "medium":   {"min": 30.0, "max": 59.0},
-        "high":     {"min": 60.0, "max": 99.0},
-        "critical": {"min": 100.0, "max": None},
-    })
+    return json.dumps(
+        {
+            "low": {"min": 0.0, "max": 29.0},
+            "medium": {"min": 30.0, "max": 59.0},
+            "high": {"min": 60.0, "max": 99.0},
+            "critical": {"min": 100.0, "max": None},
+        }
+    )
 
 
 async def _seed_policy(session: AsyncSession) -> RiskPolicy:
@@ -69,16 +71,23 @@ async def _seed_policy(session: AsyncSession) -> RiskPolicy:
 
     for factor_id, label, weight in [
         ("after_hours_access", "After Hours Access", 40.0),
-        ("unverified_person",  "Unverified Person",  50.0),
-        ("no_work_order",      "No Work Order",      20.0),
+        ("unverified_person", "Unverified Person", 50.0),
+        ("no_work_order", "No Work Order", 20.0),
         ("no_scheduled_entry", "No Scheduled Entry", 20.0),
         ("known_incident_area", "Known Incident Area", 30.0),
-        ("critical_zone",      "Critical Zone",      40.0),
+        ("critical_zone", "Critical Zone", 40.0),
     ]:
-        session.add(RiskPolicyFactor(
-            id=_uid(), policy_id=policy.id, factor_id=factor_id,
-            label=label, weight=weight, direction="increase", is_active=True,
-        ))
+        session.add(
+            RiskPolicyFactor(
+                id=_uid(),
+                policy_id=policy.id,
+                factor_id=factor_id,
+                label=label,
+                weight=weight,
+                direction="increase",
+                is_active=True,
+            )
+        )
     await session.flush()
     return policy
 
@@ -116,17 +125,13 @@ async def _seed_and_assess(
 
 
 class TestGetAssessmentFactorsHappyPath:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """Basic retrieval: assess then GET /factors must return 200."""
         event = await _seed_and_assess(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/assessment/factors")
         assert resp.status_code == 200, resp.text
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """All required top-level fields must be present with correct types."""
         event = await _seed_and_assess(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/assessment/factors")
@@ -140,17 +145,13 @@ class TestGetAssessmentFactorsHappyPath:
         assert isinstance(data["factors"], list)
         assert "assessed_at" in data
 
-    async def test_factors_non_empty(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_factors_non_empty(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """factors list must contain at least one item after assessment."""
         event = await _seed_and_assess(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/assessment/factors")
         assert len(resp.json()["factors"]) > 0
 
-    async def test_each_factor_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_each_factor_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """Each factor must have all required sub-fields."""
         event = await _seed_and_assess(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/assessment/factors")
@@ -182,15 +183,11 @@ class TestGetAssessmentFactorsHappyPath:
 
         assess_resp = await client.post(f"/api/v1/events/{event.id}/assess")
         assert assess_resp.status_code == 200
-        assess_factors = {
-            f["factor_id"]: f for f in assess_resp.json()["risk_factors"]
-        }
+        assess_factors = {f["factor_id"]: f for f in assess_resp.json()["risk_factors"]}
 
         factors_resp = await client.get(f"/api/v1/events/{event.id}/assessment/factors")
         assert factors_resp.status_code == 200
-        get_factors = {
-            f["factor_id"]: f for f in factors_resp.json()["factors"]
-        }
+        get_factors = {f["factor_id"]: f for f in factors_resp.json()["factors"]}
 
         # Same set of factor IDs
         assert set(assess_factors) == set(get_factors)

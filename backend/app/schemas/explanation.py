@@ -12,7 +12,6 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 EvidenceId = Annotated[str, Field(min_length=1, max_length=128)]
 MissingEvidenceLine = Annotated[str, Field(min_length=1, max_length=256)]
 LimitationLine = Annotated[str, Field(min_length=1, max_length=512)]
@@ -101,6 +100,8 @@ class AssessmentBundleResponse(BaseModel):
     triage: dict[str, Any] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
     explanation: dict[str, Any] = Field(default_factory=dict)
+    recommendation_id: str | None = None
+    recommendation: dict[str, Any] = Field(default_factory=dict)
     evidence_errors: dict[str, str] = Field(default_factory=dict)
     workflow_state: dict[str, Any] = Field(default_factory=dict)
     assessed_at: str

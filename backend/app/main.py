@@ -98,12 +98,11 @@ def create_app() -> FastAPI:
         identity = request_identity(request)
         checks = [("api", identity, settings.rate_limit_api_per_minute)]
         if request.method == "POST" and request.url.path == "/api/v1/events":
-            checks.append(
-                ("event_ingestion", identity, settings.rate_limit_events_per_minute)
-            )
+            checks.append(("event_ingestion", identity, settings.rate_limit_events_per_minute))
         if request.method == "POST" and request.url.path in {
             "/api/v1/auth/token",
             "/api/v1/auth/refresh",
+            "/api/v1/auth/logout",
         }:
             # Never let an optional bearer header shift login/refresh attempts
             # into another principal's bucket.

@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     # Leave empty to fall through to Path A (watsonx.ai direct).
     orchestrate_url: str = ""
     orchestrate_api_key: str = ""
+    orchestrate_api_version: Literal["v2", "v1_5"] = "v2"
     # Agent IDs as imported into Orchestrate (set after `orchestrate agents import`)
     orchestrate_triage_agent_id: str = "sentinel_triage_agent"
     orchestrate_context_agent_id: str = "sentinel_context_agent"
@@ -104,8 +105,8 @@ class Settings(BaseSettings):
     # Kept so existing .env files that still set ORCHESTRATE_BASE_URL /
     # ORCHESTRATE_SPACE_ID continue to work.
     # ---------------------------------------------------------------------------
-    orchestrate_base_url: str = ""   # remapped → watsonx_base_url if set
-    orchestrate_space_id: str = ""   # remapped → watsonx_space_id if set
+    orchestrate_base_url: str = ""  # remapped → watsonx_base_url if set
+    orchestrate_space_id: str = ""  # remapped → watsonx_space_id if set
 
     @property
     def effective_watsonx_base_url(self) -> str:
@@ -123,11 +124,16 @@ class Settings(BaseSettings):
         return self.watsonx_api_key or self.orchestrate_api_key
 
     @property
+    def effective_orchestrate_api_key(self) -> str:
+        """Return the Orchestrate IAM key, preferring its dedicated setting."""
+        return self.orchestrate_api_key or self.watsonx_api_key
+
+    @property
     def orchestrate_active(self) -> bool:
         """True when a watsonx Orchestrate SaaS tenant URL is configured."""
         if self.app_env == "test" or "PYTEST_CURRENT_TEST" in os.environ:
             return False
-        return bool(self.orchestrate_url and self.effective_watsonx_api_key)
+        return bool(self.orchestrate_url and self.effective_orchestrate_api_key)
 
     @property
     def watsonx_active(self) -> bool:

@@ -56,10 +56,12 @@ async def test_aggregator_error_keys_mark_canonical_sources_unavailable(
         location_policy=object(),
         incident_history=object(),
     )
-    normalized = service._normalize_evidence_errors({
-        "access_events": "timeout",
-        "schedule": "connection failed",
-    })
+    normalized = service._normalize_evidence_errors(
+        {
+            "access_events": "timeout",
+            "schedule": "connection failed",
+        }
+    )
     statuses = service._build_source_statuses(evidence, set(), normalized)
     by_id = {status.source_id: status.available for status in statuses}
 
@@ -70,6 +72,7 @@ async def test_aggregator_error_keys_mark_canonical_sources_unavailable(
     assert by_id["mock_access_control"] is False
     assert by_id["mock_schedule"] is False
     assert by_id["mock_work_order"] is True
+
 
 _LOC = "loc-gate8-test"
 _FAC = "fac-gate8-test"
@@ -136,23 +139,25 @@ async def _seed_risk_policy(session: AsyncSession) -> RiskPolicy:
         name="Default v1.0",
         description="Test policy",
         is_active=True,
-        thresholds_json=_json.dumps({
-            "low":      {"min": 0.0,  "max": 29.0},
-            "medium":   {"min": 30.0, "max": 59.0},
-            "high":     {"min": 60.0, "max": 99.0},
-            "critical": {"min": 100.0, "max": None},
-        }),
+        thresholds_json=_json.dumps(
+            {
+                "low": {"min": 0.0, "max": 29.0},
+                "medium": {"min": 30.0, "max": 59.0},
+                "high": {"min": 60.0, "max": 99.0},
+                "critical": {"min": 100.0, "max": None},
+            }
+        ),
     )
     session.add(policy)
     await session.flush()
 
     factors = [
-        ("after_hours_access",    "After Hours Access",      40.0, "increase"),
-        ("unverified_person",     "Unverified Person",       50.0, "increase"),
-        ("no_work_order",         "No Work Order",           20.0, "increase"),
-        ("no_scheduled_entry",    "No Scheduled Entry",      20.0, "increase"),
-        ("known_incident_area",   "Known Incident Area",     30.0, "increase"),
-        ("critical_zone",         "Critical Zone",           40.0, "increase"),
+        ("after_hours_access", "After Hours Access", 40.0, "increase"),
+        ("unverified_person", "Unverified Person", 50.0, "increase"),
+        ("no_work_order", "No Work Order", 20.0, "increase"),
+        ("no_scheduled_entry", "No Scheduled Entry", 20.0, "increase"),
+        ("known_incident_area", "Known Incident Area", 30.0, "increase"),
+        ("critical_zone", "Critical Zone", 40.0, "increase"),
     ]
     for factor_id, label, weight, direction in factors:
         f = RiskPolicyFactor(

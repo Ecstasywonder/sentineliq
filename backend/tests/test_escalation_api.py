@@ -82,12 +82,14 @@ def _uid() -> str:
 
 
 def _thresholds_json() -> str:
-    return json.dumps({
-        "low":      {"min": 0.0,  "max": 29.0},
-        "medium":   {"min": 30.0, "max": 59.0},
-        "high":     {"min": 60.0, "max": 99.0},
-        "critical": {"min": 100.0, "max": None},
-    })
+    return json.dumps(
+        {
+            "low": {"min": 0.0, "max": 29.0},
+            "medium": {"min": 30.0, "max": 59.0},
+            "high": {"min": 60.0, "max": 99.0},
+            "critical": {"min": 100.0, "max": None},
+        }
+    )
 
 
 async def _seed_policy(session: AsyncSession) -> RiskPolicy:
@@ -98,23 +100,33 @@ async def _seed_policy(session: AsyncSession) -> RiskPolicy:
         return existing
 
     policy = RiskPolicy(
-        id=_uid(), version="1.0", name="Default v1.0",
-        is_active=True, thresholds_json=_thresholds_json(),
+        id=_uid(),
+        version="1.0",
+        name="Default v1.0",
+        is_active=True,
+        thresholds_json=_thresholds_json(),
     )
     session.add(policy)
     await session.flush()
     for fid, label, weight in [
         ("after_hours_access", "After Hours Access", 40.0),
-        ("unverified_person",  "Unverified Person",  50.0),
-        ("no_work_order",      "No Work Order",      20.0),
+        ("unverified_person", "Unverified Person", 50.0),
+        ("no_work_order", "No Work Order", 20.0),
         ("no_scheduled_entry", "No Scheduled Entry", 20.0),
         ("known_incident_area", "Known Incident Area", 30.0),
-        ("critical_zone",      "Critical Zone",      40.0),
+        ("critical_zone", "Critical Zone", 40.0),
     ]:
-        session.add(RiskPolicyFactor(
-            id=_uid(), policy_id=policy.id, factor_id=fid,
-            label=label, weight=weight, direction="increase", is_active=True,
-        ))
+        session.add(
+            RiskPolicyFactor(
+                id=_uid(),
+                policy_id=policy.id,
+                factor_id=fid,
+                label=label,
+                weight=weight,
+                direction="increase",
+                is_active=True,
+            )
+        )
     await session.flush()
     return policy
 
@@ -170,17 +182,13 @@ async def _post_escalation(
 
 
 class TestPostEscalationHappyPath:
-    async def test_returns_201(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_201(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         # The auto-created escalation is already there; POST creates a second one
         resp = await _post_escalation(client, event.id)
         assert resp.status_code == 201, resp.text
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await _post_escalation(client, event.id, destination="response_team")
         data = resp.json()
@@ -194,30 +202,22 @@ class TestPostEscalationHappyPath:
         assert "escalated_at" in data
         assert "event_status" in data
 
-    async def test_destination_stored(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_destination_stored(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await _post_escalation(client, event.id, destination="security_admin")
         assert resp.json()["destination"] == "security_admin"
 
-    async def test_priority_stored(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_priority_stored(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await _post_escalation(client, event.id, priority="critical")
         assert resp.json()["priority"] == "critical"
 
-    async def test_note_stored(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_note_stored(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await _post_escalation(client, event.id, note="Potential armed intruder")
         assert resp.json()["note"] == "Potential armed intruder"
 
-    async def test_null_note_accepted(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_null_note_accepted(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await _post_escalation(client, event.id, note=None)
         assert resp.status_code == 201
@@ -230,9 +230,7 @@ class TestPostEscalationHappyPath:
         resp = await _post_escalation(client, event.id)
         assert resp.json()["status"] == "pending_acknowledgement"
 
-    async def test_audit_event_created(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_audit_event_created(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         await _post_escalation(client, event.id)
 
@@ -283,9 +281,7 @@ class TestAutoCreatedEscalation:
 
 
 class TestGetEscalation:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/escalation")
         assert resp.status_code == 200
@@ -300,21 +296,21 @@ class TestGetEscalation:
         assert get_resp.json()["destination"] == "external"
         assert get_resp.json()["escalation_id"] == post_resp.json()["escalation_id"]
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get("/api/v1/events/does-not-exist/escalation")
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "EVENT_NOT_FOUND"
 
-    async def test_404_never_escalated(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_never_escalated(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = SecurityEvent(
-            id=_uid(), provider_event_id=f"prov-{_uid()}",
-            source_adapter="simulator", event_type="motion_detected",
+            id=_uid(),
+            provider_event_id=f"prov-{_uid()}",
+            source_adapter="simulator",
+            event_type="motion_detected",
             event_timestamp="2026-11-03T10:00:00Z",
-            location_id=_LOC, facility_id=_FAC, status="normalised",
+            location_id=_LOC,
+            facility_id=_FAC,
+            status="normalised",
         )
         db_session.add(event)
         await db_session.flush()
@@ -440,9 +436,7 @@ class TestPostEscalationErrors:
         assert resp.status_code == 400
         assert resp.json()["detail"]["code"] == "INVALID_PRIORITY"
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.post(
             "/api/v1/events/does-not-exist/escalation",
             json={"destination": "shift_supervisor", "priority": "high"},
@@ -453,10 +447,14 @@ class TestPostEscalationErrors:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         event = SecurityEvent(
-            id=_uid(), provider_event_id=f"prov-{_uid()}",
-            source_adapter="simulator", event_type="motion_detected",
+            id=_uid(),
+            provider_event_id=f"prov-{_uid()}",
+            source_adapter="simulator",
+            event_type="motion_detected",
             event_timestamp="2026-11-03T10:00:00Z",
-            location_id=_LOC, facility_id=_FAC, status="normalised",
+            location_id=_LOC,
+            facility_id=_FAC,
+            status="normalised",
         )
         db_session.add(event)
         await db_session.flush()
@@ -474,9 +472,7 @@ class TestPostEscalationErrors:
 
 
 class TestPatchEscalationErrors:
-    async def test_400_invalid_status(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_400_invalid_status(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_escalated(client, db_session)
         resp = await client.patch(
             f"/api/v1/events/{event.id}/escalation",
@@ -485,9 +481,7 @@ class TestPatchEscalationErrors:
         assert resp.status_code == 400
         assert resp.json()["detail"]["code"] == "INVALID_ESCALATION_STATUS"
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.patch(
             "/api/v1/events/does-not-exist/escalation",
             json={"status": "acknowledged"},
@@ -498,10 +492,14 @@ class TestPatchEscalationErrors:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         event = SecurityEvent(
-            id=_uid(), provider_event_id=f"prov-{_uid()}",
-            source_adapter="simulator", event_type="motion_detected",
+            id=_uid(),
+            provider_event_id=f"prov-{_uid()}",
+            source_adapter="simulator",
+            event_type="motion_detected",
             event_timestamp="2026-11-03T10:00:00Z",
-            location_id=_LOC, facility_id=_FAC, status="escalated",
+            location_id=_LOC,
+            facility_id=_FAC,
+            status="escalated",
         )
         db_session.add(event)
         await db_session.flush()

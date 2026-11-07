@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -27,6 +27,7 @@ class OperatorDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(36), ForeignKey("security_events.id", ondelete="CASCADE"), nullable=False, index=True
     )
     recommendation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    recommendation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     decided_by: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     decided_by_role: Mapped[str] = mapped_column(String(64), nullable=False)
     decision: Mapped[str] = mapped_column(String(32), nullable=False)

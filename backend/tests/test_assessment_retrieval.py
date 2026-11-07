@@ -18,10 +18,12 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.assessment import RiskAssessment
 from app.models.event import SecurityEvent
+from app.models.recommendation import Recommendation
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
 
 pytestmark = pytest.mark.asyncio
@@ -40,12 +42,14 @@ def _uid() -> str:
 
 
 def _thresholds_json() -> str:
-    return json.dumps({
-        "low":      {"min": 0.0,  "max": 29.0},
-        "medium":   {"min": 30.0, "max": 59.0},
-        "high":     {"min": 60.0, "max": 99.0},
-        "critical": {"min": 100.0, "max": None},
-    })
+    return json.dumps(
+        {
+            "low": {"min": 0.0, "max": 29.0},
+            "medium": {"min": 30.0, "max": 59.0},
+            "high": {"min": 60.0, "max": 99.0},
+            "critical": {"min": 100.0, "max": None},
+        }
+    )
 
 
 async def _seed_policy(session: AsyncSession) -> RiskPolicy:
@@ -69,16 +73,23 @@ async def _seed_policy(session: AsyncSession) -> RiskPolicy:
 
     for factor_id, label, weight in [
         ("after_hours_access", "After Hours Access", 40.0),
-        ("unverified_person",  "Unverified Person",  50.0),
-        ("no_work_order",      "No Work Order",      20.0),
+        ("unverified_person", "Unverified Person", 50.0),
+        ("no_work_order", "No Work Order", 20.0),
         ("no_scheduled_entry", "No Scheduled Entry", 20.0),
-        ("known_incident_area","Known Incident Area",30.0),
-        ("critical_zone",      "Critical Zone",      40.0),
+        ("known_incident_area", "Known Incident Area", 30.0),
+        ("critical_zone", "Critical Zone", 40.0),
     ]:
-        session.add(RiskPolicyFactor(
-            id=_uid(), policy_id=policy.id, factor_id=factor_id,
-            label=label, weight=weight, direction="increase", is_active=True,
-        ))
+        session.add(
+            RiskPolicyFactor(
+                id=_uid(),
+                policy_id=policy.id,
+                factor_id=factor_id,
+                label=label,
+                weight=weight,
+                direction="increase",
+                is_active=True,
+            )
+        )
     await session.flush()
     return policy
 
@@ -123,9 +134,7 @@ class TestGetAssessmentHappyPath:
         resp = await client.get(f"/api/v1/events/{event.id}/assessment")
         assert resp.status_code == 200, resp.text
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """All required fields must be present with correct types."""
         event = await _seed_and_assess(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/assessment")
@@ -194,8 +203,6 @@ class TestGetAssessmentHappyPath:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         """assessment_id in response must match the RiskAssessment.id in the DB."""
-        from sqlalchemy import select
-
         event = await _seed_and_assess(client, db_session)
 
         stmt = select(RiskAssessment).where(RiskAssessment.event_id == event.id)
@@ -216,11 +223,72 @@ class TestGetAssessmentHappyPath:
         assert data["context"] is not None
         assert data["explanation"] is not None
         assert data["explanation"]["recommended_action"]
-        assert data["workflow_state"] == {
+        workflow = data["workflow_state"]
+        assert workflow["schema_version"] == 1
+        assert workflow["run_status"] == "completed"
+        assert workflow["event_status"] == {
             "before": "assessing",
             "after": "awaiting_review",
         }
+        assert workflow["human_review_required"] is True
+        assert [stage["name"] for stage in workflow["stages"]] == [
+            "event",
+            "triage",
+            "context",
+            "evidence_validation",
+            "risk",
+            "confidence",
+            "explanation",
+            "recommendation",
+            "human_review",
+        ]
+        assert workflow["stages"][-1]["status"] == "required"
         assert isinstance(data["evidence_errors"], dict)
+
+    async def test_canonical_recommendation_is_persisted_and_replayed(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_and_assess(client, db_session)
+        retrieved = await client.get(f"/api/v1/events/{event.id}/assessment")
+        assert retrieved.status_code == 200, retrieved.text
+        recommendation = retrieved.json()["recommendation"]
+        assert recommendation is not None
+        assert recommendation["id"] == retrieved.json()["recommendation_id"]
+        assert recommendation["recommended_action"]
+        assert recommendation["requires_human_review"] is True
+
+        result = await db_session.execute(
+            select(Recommendation).where(Recommendation.event_id == event.id)
+        )
+        row = result.scalar_one()
+        assert row.id == recommendation["id"]
+        assert row.summary == recommendation["summary"]
+
+        replay = await client.post(f"/api/v1/events/{event.id}/assess")
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["recommendation_id"] == row.id
+
+    async def test_reassessment_updates_canonical_recommendation_in_place(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_and_assess(client, db_session)
+        original = await db_session.scalar(
+            select(Recommendation).where(Recommendation.event_id == event.id)
+        )
+        assert original is not None
+
+        event.status = "normalised"
+        await db_session.flush()
+        reassessed = await client.post(f"/api/v1/events/{event.id}/assess")
+        assert reassessed.status_code == 200, reassessed.text
+        assert reassessed.json()["recommendation_id"] == original.id
+
+        recommendation_count = await db_session.scalar(
+            select(func.count())
+            .select_from(Recommendation)
+            .where(Recommendation.event_id == event.id)
+        )
+        assert recommendation_count == 1
 
 
 class TestGetAssessmentErrorCases:

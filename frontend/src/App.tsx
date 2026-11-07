@@ -12,14 +12,23 @@ import {
   getCoordinatorReview,
   getDecisionHistory,
   getEscalation,
+  getEventAudit,
+  getEventEscalationDetail,
+  getGlobalAudit,
   getEvent,
   getEvents,
+  getRiskPolicies,
+  getRiskPolicy,
   recordDecision,
   type Assessment,
+  type AuditEntry,
+  type AuditList,
   type CoordinatorReview,
   type Decision,
   type Escalation,
+  type EscalationDetail,
   type RiskLevel,
+  type RiskPolicyDetail,
   type SecurityEvent,
 } from "./api";
 import { useAuth } from "./auth";
@@ -73,6 +82,443 @@ const formatTime = (value: string) => {
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
+
+// ---------------------------------------------------------------------------
+// Shared RBAC helpers
+// ---------------------------------------------------------------------------
+
+const auditRoles = new Set([
+  "supervisor",
+  "facility_manager",
+  "security_admin",
+  "audit_reviewer",
+  "agent_admin",
+  "platform_admin",
+]);
+
+const policyRoles = new Set(["security_admin", "platform_admin"]);
+
+// ---------------------------------------------------------------------------
+// Gate 18 — Audit and history panels
+// ---------------------------------------------------------------------------
+
+/** Render one audit entry row in a consistent format. */
+function AuditEntryRow({ entry }: { entry: AuditEntry }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <li className="audit-entry">
+      <div className="audit-entry-header">
+        <span className="audit-action">{humanize(entry.action)}</span>
+        <span className="audit-actor">{entry.actor}</span>
+        {entry.actor_role && (
+          <span className="audit-role">{humanize(entry.actor_role)}</span>
+        )}
+        <span className="audit-time">{formatTime(entry.occurred_at)}</span>
+        {entry.details && !entry.redacted && (
+          <button
+            className="secondary small"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Hide details" : "Show details"}
+          </button>
+        )}
+        {entry.redacted && <span className="audit-redacted">Redacted</span>}
+      </div>
+      {expanded && entry.details && (
+        <pre className="audit-details">
+          {JSON.stringify(entry.details, null, 2)}
+        </pre>
+      )}
+    </li>
+  );
+}
+
+/** Paginated audit trail list — used by both EventAuditPanel and AuditPage. */
+function AuditTrailList({
+  load,
+  title,
+}: {
+  load: (page: number) => Promise<AuditList>;
+  title: string;
+}): React.JSX.Element {
+  const [data, setData] = useState<AuditList | null>(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const fetch = useCallback(
+    async (p: number) => {
+      setLoading(true);
+      setError("");
+      try {
+        const result = await load(p);
+        setData(result);
+        setPage(p);
+      } catch (e) {
+        setError(errorMessage(e, "Audit trail could not be loaded."));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [load],
+  );
+
+  useEffect(() => {
+    void fetch(1);
+  }, [fetch]);
+
+  return (
+    <div>
+      <div className="section-heading">
+        <div>
+          <h2>{title}</h2>
+          {data && (
+            <p>
+              {data.total} entr{data.total === 1 ? "y" : "ies"} · page {page}{" "}
+              of {data.pages}
+            </p>
+          )}
+        </div>
+        <button
+          className="secondary"
+          onClick={() => void fetch(page)}
+          disabled={loading}
+        >
+          Refresh
+        </button>
+      </div>
+
+      {loading && (
+        <p className="loading" role="status">
+          Loading audit trail…
+        </p>
+      )}
+      {error && (
+        <div className="error-panel" role="alert">
+          <p>{error}</p>
+          <button className="secondary" onClick={() => void fetch(page)}>
+            Try again
+          </button>
+        </div>
+      )}
+      {data && data.items.length === 0 && !loading && (
+        <p>No audit entries found.</p>
+      )}
+      {data && data.items.length > 0 && (
+        <ul className="audit-list" aria-label="Audit trail entries">
+          {data.items.map((entry) => (
+            <AuditEntryRow key={entry.audit_id} entry={entry} />
+          ))}
+        </ul>
+      )}
+      {data && data.pages > 1 && !loading && (
+        <nav className="pagination" aria-label="Audit trail pages">
+          <button
+            className="secondary"
+            disabled={page <= 1}
+            onClick={() => void fetch(page - 1)}
+          >
+            Previous
+          </button>
+          <span aria-live="polite">
+            Page {page} of {data.pages}
+          </span>
+          <button
+            className="secondary"
+            disabled={page >= data.pages}
+            onClick={() => void fetch(page + 1)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
+    </div>
+  );
+}
+
+/** Event-scoped audit panel embedded in EventDetail. */
+function EventAuditPanel({
+  eventId,
+  canAudit,
+}: {
+  eventId: string;
+  canAudit: boolean;
+}): React.JSX.Element | null {
+  const load = useCallback(
+    (p: number) => getEventAudit(eventId, p),
+    [eventId],
+  );
+  if (!canAudit) return null;
+  return (
+    <section className="panel" aria-labelledby="audit-panel-title">
+      <h2 id="audit-panel-title">Complete event audit trail</h2>
+      <p className="notice">
+        This immutable trail records every system and operator action taken on
+        this event. Entries cannot be modified or deleted.
+      </p>
+      <AuditTrailList load={load} title="Event audit entries" />
+    </section>
+  );
+}
+
+/** Escalation detail panel — full EscalationDetail from backend (Gate 11 schema). */
+function EscalationDetailPanel({
+  eventId,
+  isEscalated,
+}: {
+  eventId: string;
+  isEscalated: boolean;
+}): React.JSX.Element | null {
+  const [detail, setDetail] = useState<EscalationDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isEscalated) return;
+    setLoading(true);
+    getEventEscalationDetail(eventId)
+      .then((r) => {
+        setDetail(r);
+        setLoaded(true);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) {
+          setLoaded(true);
+        } else {
+          setError(
+            errorMessage(e, "Escalation details could not be retrieved."),
+          );
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [eventId, isEscalated]);
+
+  if (!isEscalated) return null;
+
+  return (
+    <section className="panel" aria-labelledby="escalation-detail-title">
+      <h2 id="escalation-detail-title">Escalation history</h2>
+      {loading && (
+        <p className="loading" role="status">
+          Loading escalation…
+        </p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {loaded && !detail && !error && (
+        <p>No escalation record found for this event.</p>
+      )}
+      {detail && (
+        <dl>
+          <div>
+            <dt>Destination</dt>
+            <dd>{humanize(detail.destination)}</dd>
+          </div>
+          <div>
+            <dt>Priority</dt>
+            <dd>{humanize(detail.priority)}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>{humanize(detail.status)}</dd>
+          </div>
+          {detail.note && (
+            <div>
+              <dt>Note</dt>
+              <dd>{detail.note}</dd>
+            </div>
+          )}
+          <div>
+            <dt>Escalated by</dt>
+            <dd>
+              {detail.escalated_by}{" "}
+              <small>({humanize(detail.escalated_by_role)})</small>
+            </dd>
+          </div>
+          <div>
+            <dt>Escalated at</dt>
+            <dd>{formatTime(detail.escalated_at)}</dd>
+          </div>
+          {detail.acknowledged_by && (
+            <div>
+              <dt>Acknowledged by</dt>
+              <dd>
+                {detail.acknowledged_by}
+                {detail.acknowledged_at && (
+                  <> at {formatTime(detail.acknowledged_at)}</>
+                )}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </section>
+  );
+}
+
+/** Risk policy reference panel — shows active policy and factor table. */
+function RiskPolicyPanel({
+  policyVersion,
+  canPolicy,
+}: {
+  policyVersion: string;
+  canPolicy: boolean;
+}): React.JSX.Element | null {
+  const [policy, setPolicy] = useState<RiskPolicyDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      // Find the policy by version from the list
+      const list = await getRiskPolicies();
+      const found = list.items.find((p) => p.version === policyVersion);
+      if (found) {
+        const full = await getRiskPolicy(found.id);
+        setPolicy(full);
+      }
+    } catch (e) {
+      setError(errorMessage(e, "Risk policy could not be loaded."));
+    } finally {
+      setLoading(false);
+    }
+  }, [policyVersion]);
+
+  if (!canPolicy) return null;
+
+  return (
+    <section className="panel" aria-labelledby="policy-panel-title">
+      <h2 id="policy-panel-title">Risk-policy reference</h2>
+      <p>
+        Policy version applied to this assessment:{" "}
+        <strong>{policyVersion}</strong>
+      </p>
+
+      {!policy && !loading && !error && (
+        <button className="secondary" onClick={() => void load()}>
+          Load policy details
+        </button>
+      )}
+      {loading && (
+        <p className="loading" role="status">
+          Loading risk policy…
+        </p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {policy && (
+        <>
+          <dl>
+            <div>
+              <dt>Name</dt>
+              <dd>{policy.name}</dd>
+            </div>
+            {policy.description && (
+              <div>
+                <dt>Description</dt>
+                <dd>{policy.description}</dd>
+              </div>
+            )}
+            <div>
+              <dt>Effective from</dt>
+              <dd>{formatTime(policy.effective_from)}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>{policy.is_active ? "Active" : "Inactive"}</dd>
+            </div>
+          </dl>
+          {policy.factors.length > 0 && (
+            <>
+              <h3>Risk factors</h3>
+              <ul className="factors">
+                {policy.factors.map((f) => (
+                  <li key={f.factor_id}>
+                    <span>
+                      {f.label}
+                      {f.description && (
+                        <small> — {f.description}</small>
+                      )}
+                    </span>
+                    <strong>
+                      {f.direction === "increase" ? "+" : "−"}
+                      {f.weight} pts
+                      {!f.is_active && " (inactive)"}
+                    </strong>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Full-page audit trail for roles with audit:read. */
+function AuditPage(): React.JSX.Element {
+  const [actionFilter, setActionFilter] = useState("");
+  const [actorFilter, setActorFilter] = useState("");
+  const [filterKey, setFilterKey] = useState(0);
+
+  const load = useCallback(
+    (p: number) => getGlobalAudit(p, actionFilter, actorFilter),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filterKey],
+  );
+
+  const applyFilters = () => setFilterKey((k) => k + 1);
+
+  return (
+    <section aria-labelledby="audit-page-title">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Administration</p>
+          <h1 id="audit-page-title">Audit trail</h1>
+          <p>
+            Immutable record of all system and operator actions. Cannot be
+            modified.
+          </p>
+        </div>
+      </div>
+
+      <div className="filters" aria-label="Audit filters">
+        <label>
+          Action
+          <input
+            type="text"
+            value={actionFilter}
+            placeholder="e.g. risk_assessed"
+            onChange={(e) => setActionFilter(e.target.value)}
+          />
+        </label>
+        <label>
+          Actor
+          <input
+            type="text"
+            value={actorFilter}
+            placeholder="e.g. operator@example.com"
+            onChange={(e) => setActorFilter(e.target.value)}
+          />
+        </label>
+        <button onClick={applyFilters}>Apply filters</button>
+      </div>
+
+      <AuditTrailList load={load} title="All audit entries" />
+    </section>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Gate 17 sub-panels
@@ -839,6 +1285,8 @@ function EventDetail({
   const mayDecide = roles.some((role) => decisionRoles.has(role));
   const mayEscalate = roles.some((role) => escalationRoles.has(role));
   const mayOverride = roles.some((role) => overrideRoles.has(role));
+  const canAudit = roles.some((role) => auditRoles.has(role));
+  const canPolicy = roles.some((role) => policyRoles.has(role));
   const availableDecisions = [
     ...standardDecisions,
     ...(mayEscalate ? ["escalate"] : []),
@@ -1118,6 +1566,20 @@ function EventDetail({
       {/* ── Escalation panel (Gate 17) ───────────────────────────────── */}
       <EscalationPanel eventId={eventId} isEscalated={isEscalated} />
 
+      {/* ── Escalation history detail (Gate 18) ──────────────────────── */}
+      <EscalationDetailPanel eventId={eventId} isEscalated={isEscalated} />
+
+      {/* ── Risk-policy reference (Gate 18) ──────────────────────────── */}
+      {assessment && (
+        <RiskPolicyPanel
+          policyVersion={assessment.risk_policy_version}
+          canPolicy={canPolicy}
+        />
+      )}
+
+      {/* ── Event audit trail (Gate 18) ───────────────────────────────── */}
+      <EventAuditPanel eventId={eventId} canAudit={canAudit} />
+
       {/* ── Action error ─────────────────────────────────────────────── */}
       {actionError && (
         <div className="error-panel" role="alert">
@@ -1175,6 +1637,7 @@ function EventDetail({
 export default function App(): React.JSX.Element {
   const { user, loading, signOut } = useAuth();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [page, setPage] = useState<"queue" | "audit">("queue");
 
   if (loading) {
     return (
@@ -1190,6 +1653,18 @@ export default function App(): React.JSX.Element {
     return <Login />;
   }
 
+  const canViewAudit = user.roles.some((r) => auditRoles.has(r));
+
+  // Navigating to queue resets event selection
+  const goQueue = () => {
+    setPage("queue");
+    setSelectedEventId(null);
+  };
+  const goAudit = () => {
+    setPage("audit");
+    setSelectedEventId(null);
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar" role="banner">
@@ -1202,11 +1677,23 @@ export default function App(): React.JSX.Element {
             <button
               className="nav-link"
               type="button"
-              aria-current={selectedEventId ? undefined : "page"}
-              onClick={() => setSelectedEventId(null)}
+              aria-current={
+                page === "queue" && !selectedEventId ? "page" : undefined
+              }
+              onClick={goQueue}
             >
               Event queue
             </button>
+            {canViewAudit && (
+              <button
+                className="nav-link"
+                type="button"
+                aria-current={page === "audit" ? "page" : undefined}
+                onClick={goAudit}
+              >
+                Audit trail
+              </button>
+            )}
             {selectedEventId && <span aria-current="page">Event detail</span>}
           </nav>
           <span>{user.full_name}</span>
@@ -1216,14 +1703,16 @@ export default function App(): React.JSX.Element {
         </div>
       </header>
 
-      {selectedEventId ? (
+      {page === "audit" ? (
+        <AuditPage />
+      ) : selectedEventId ? (
         <EventDetail
           eventId={selectedEventId}
           onBack={() => setSelectedEventId(null)}
           roles={user.roles}
         />
       ) : (
-        <EventQueue onOpen={setSelectedEventId} />
+        <EventQueue onOpen={(id) => { setSelectedEventId(id); setPage("queue"); }} />
       )}
     </div>
   );

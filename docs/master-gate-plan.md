@@ -49,7 +49,7 @@ an older report's gate number.
 | **18** | Audit and history interface | ✅ Complete — `EventAuditPanel`, `EscalationDetailPanel`, `RiskPolicyPanel`, `AuditPage`, `DecisionHistoryPanel`, 13 unit tests, audit CSS | `docs/gate-18-audit-history.md`, `frontend/src/App.tsx` |
 | **19** | RBAC and administrative controls | ✅ Complete — admin API (7 routes), AdminPage, roles reference, 34 backend + 5 frontend tests, 608 backend tests pass, 90% coverage | `docs/gate-19-rbac-admin.md`, `backend/app/api/v1/endpoints/admin.py` |
 | **20** | Integration and failure-state hardening | ✅ Complete — 30 tests covering 9 failure scenarios; all architecture invariants verified; 638 backend + 39 frontend tests passing | `docs/gate-20-failure-hardening.md` |
-| **21** | Evaluation framework | 🔲 Not started | `evaluations/` placeholders |
+| **21** | Evaluation framework | ✅ Complete — 30-case dataset (all 26 MBP §35 categories), scorer, 106 pipeline + 15 unit tests, baseline report | `docs/gate-21-evaluation-framework.md` |
 | **22** | Security and adversarial testing | ⚠️ Partial — threat model and focused prompt-injection tests exist; full security test gate remains | `docs/threat-model.md` |
 | **23** | MVP usability and operator validation readiness | 🔲 Not started | — |
 | **24** | MVP release candidate | 🔲 Not started | — |

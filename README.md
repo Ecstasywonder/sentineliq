@@ -48,13 +48,14 @@ gate reports retain their original labels; the
 | 18 | Audit and history interface | ✅ Complete |
 | 19 | RBAC and administrative controls | ✅ Complete |
 | 20 | Integration and failure-state hardening | ✅ Complete |
-| 21–48 | Remaining MVP and production gates | 🔲 Pending |
+| 21 | Evaluation framework | ✅ Complete |
+| 22–48 | Remaining MVP and production gates | 🔲 Pending |
 
-**Latest EC2 validation (Gate 20):** 638 backend tests passed (30.00s), 39 frontend tests passed;
-ruff check + format clean across 122 Python files; production Vite build succeeded.
-See [Gate 20 report](docs/gate-20-failure-hardening.md).
+**Latest EC2 validation (Gate 21):** 744 backend tests passed (30.05s), 39 frontend tests passed;
+15 scorer unit tests passed; ruff check + format clean across 126 files; production Vite build succeeded.
+See [Gate 21 report](docs/gate-21-evaluation-framework.md).
 
-**Current focus:** Gate 21 — Evaluation framework.
+**Current focus:** Gate 22 — Security and adversarial testing.
 
 ---
 

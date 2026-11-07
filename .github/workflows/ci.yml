@@ -73,8 +73,8 @@ jobs:
         env:
           APP_ENV: development
           SECRET_KEY: ci-test-secret-key-not-for-production
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
-          DATABASE_URL_SYNC: sqlite:///:memory:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          DATABASE_URL_SYNC: "sqlite:///:memory:"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

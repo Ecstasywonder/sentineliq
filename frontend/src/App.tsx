@@ -153,6 +153,10 @@ function AuditTrailList({
       setError("");
       try {
         const result = await load(p);
+        if (!result || !Array.isArray(result.items)) {
+          setError("Audit trail could not be loaded.");
+          return;
+        }
         setData(result);
         setPage(p);
       } catch (e) {

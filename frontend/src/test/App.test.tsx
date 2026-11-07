@@ -439,8 +439,8 @@ describe("App", () => {
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ detail: "Assessment bundle not found." }), { status: 404 }),
         )
-        .mockResolvedValueOnce(decisionHistoryResponse())
-        // audit_reviewer has canAudit=true so EventAuditPanel mounts and calls getEventAudit
+        // No assessment → DecisionHistoryPanel never mounts → no decisions fetch.
+        // audit_reviewer has canAudit=true so EventAuditPanel mounts and calls getEventAudit.
         .mockResolvedValueOnce(
           new Response(
             JSON.stringify({ items: [], total: 0, page: 1, page_size: 50, pages: 1 }),

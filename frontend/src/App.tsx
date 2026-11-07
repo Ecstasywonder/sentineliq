@@ -9,10 +9,16 @@ import {
   ApiError,
   assessEvent,
   getAssessment,
+  getCoordinatorReview,
+  getDecisionHistory,
+  getEscalation,
   getEvent,
   getEvents,
   recordDecision,
   type Assessment,
+  type CoordinatorReview,
+  type Decision,
+  type Escalation,
   type RiskLevel,
   type SecurityEvent,
 } from "./api";
@@ -67,6 +73,360 @@ const formatTime = (value: string) => {
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
+
+// ---------------------------------------------------------------------------
+// Gate 17 sub-panels
+// ---------------------------------------------------------------------------
+
+function AgentPanel({
+  assessment,
+}: {
+  assessment: Assessment;
+}): React.JSX.Element | null {
+  const triage = assessment.triage;
+  const context = assessment.context;
+  if (!triage && !context) return null;
+
+  return (
+    <section className="panel" aria-labelledby="agent-panel-title">
+      <h2 id="agent-panel-title">Agent activity</h2>
+
+      {triage && (
+        <>
+          <h3>Triage result</h3>
+          <dl>
+            <div>
+              <dt>Category</dt>
+              <dd>{humanize(triage.category)}</dd>
+            </div>
+            <div>
+              <dt>Urgency signals</dt>
+              <dd>
+                {triage.urgency_signals.length > 0
+                  ? triage.urgency_signals.map(humanize).join(", ")
+                  : "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Required context</dt>
+              <dd>
+                {triage.required_context.length > 0
+                  ? triage.required_context.map(humanize).join(", ")
+                  : "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Triage rationale</dt>
+              <dd>{triage.triage_rationale}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>{humanize(triage.source)}</dd>
+            </div>
+            {triage.agent_run_id && (
+              <div>
+                <dt>Run ID</dt>
+                <dd>
+                  <code>{triage.agent_run_id}</code>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </>
+      )}
+
+      {context && (
+        <>
+          <h3>Context result</h3>
+          <dl>
+            <div>
+              <dt>Summary</dt>
+              <dd>{context.context_summary || "No summary available."}</dd>
+            </div>
+            <div>
+              <dt>Conflicts detected</dt>
+              <dd>
+                {context.has_conflicts ? (
+                  <ul>
+                    {context.conflicts.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  "None"
+                )}
+              </dd>
+            </div>
+            {context.has_missing_sources && (
+              <div>
+                <dt>Missing sources</dt>
+                <dd>
+                  <ul>
+                    {context.missing_sources.map((s, i) => (
+                      <li key={i}>{humanize(s)}</li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Source</dt>
+              <dd>{humanize(context.source)}</dd>
+            </div>
+            {context.agent_run_id && (
+              <div>
+                <dt>Run ID</dt>
+                <dd>
+                  <code>{context.agent_run_id}</code>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CoordinatorPanel({
+  eventId,
+  reviewable,
+}: {
+  eventId: string;
+  reviewable: boolean;
+}): React.JSX.Element {
+  const [review, setReview] = useState<CoordinatorReview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const runReview = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await getCoordinatorReview(eventId);
+      setReview(result);
+    } catch (e) {
+      setError(errorMessage(e, "Coordinator review could not be retrieved."));
+    } finally {
+      setLoading(false);
+    }
+  }, [eventId]);
+
+  if (!reviewable) return <></>;
+
+  return (
+    <section className="panel" aria-labelledby="coordinator-panel-title">
+      <h2 id="coordinator-panel-title">Coordinator review</h2>
+      <p className="notice">
+        The Coordinator provides a read-only review. It does not change event
+        state or produce an operational decision. Human review remains required.
+      </p>
+
+      {!review && !loading && !error && (
+        <button className="secondary" onClick={() => void runReview()}>
+          Request coordinator review
+        </button>
+      )}
+
+      {loading && (
+        <p className="loading" role="status">
+          Requesting coordinator review…
+        </p>
+      )}
+
+      {error && (
+        <div className="error-panel" role="alert">
+          <p>{error}</p>
+          <button className="secondary" onClick={() => void runReview()}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {review && (
+        <dl>
+          <div>
+            <dt>Summary</dt>
+            <dd>{review.summary}</dd>
+          </div>
+          <div>
+            <dt>Assessment ready</dt>
+            <dd>{review.assessment_ready ? "Yes" : "No"}</dd>
+          </div>
+          {review.missing_evidence.length > 0 && (
+            <div>
+              <dt>Missing evidence</dt>
+              <dd>
+                <ul>
+                  {review.missing_evidence.map((item, i) => (
+                    <li key={i}>{humanize(item)}</li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>Human review required</dt>
+            <dd>Yes — all operational decisions require human approval.</dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>{humanize(review.source)}</dd>
+          </div>
+          {review.agent_run_id && (
+            <div>
+              <dt>Run ID</dt>
+              <dd>
+                <code>{review.agent_run_id}</code>
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function EscalationPanel({
+  eventId,
+  isEscalated,
+}: {
+  eventId: string;
+  isEscalated: boolean;
+}): React.JSX.Element | null {
+  const [escalation, setEscalation] = useState<Escalation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isEscalated) return;
+    setLoading(true);
+    getEscalation(eventId)
+      .then((result) => {
+        setEscalation(result);
+        setLoaded(true);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) {
+          setLoaded(true);
+        } else {
+          setError(
+            errorMessage(e, "Escalation details could not be retrieved."),
+          );
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [eventId, isEscalated]);
+
+  if (!isEscalated) return null;
+
+  return (
+    <section className="panel" aria-labelledby="escalation-panel-title">
+      <h2 id="escalation-panel-title">Escalation</h2>
+
+      {loading && (
+        <p className="loading" role="status">
+          Loading escalation details…
+        </p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {loaded && !escalation && !error && (
+        <p>No escalation record was found for this event.</p>
+      )}
+      {escalation && (
+        <dl>
+          <div>
+            <dt>Reason</dt>
+            <dd>{escalation.reason}</dd>
+          </div>
+          <div>
+            <dt>Escalated by</dt>
+            <dd>{escalation.escalated_by}</dd>
+          </div>
+          {escalation.escalated_to && (
+            <div>
+              <dt>Escalated to</dt>
+              <dd>{escalation.escalated_to}</dd>
+            </div>
+          )}
+          <div>
+            <dt>Status</dt>
+            <dd>{humanize(escalation.status)}</dd>
+          </div>
+          {escalation.notes && (
+            <div>
+              <dt>Notes</dt>
+              <dd>{escalation.notes}</dd>
+            </div>
+          )}
+          <div>
+            <dt>Escalated at</dt>
+            <dd>{formatTime(escalation.created_at)}</dd>
+          </div>
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function DecisionHistoryPanel({
+  eventId,
+}: {
+  eventId: string;
+}): React.JSX.Element {
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getDecisionHistory(eventId)
+      .then((result) => setDecisions(result.decisions ?? []))
+      .catch((e: unknown) =>
+        setError(errorMessage(e, "Decision history could not be loaded.")),
+      )
+      .finally(() => setLoading(false));
+  }, [eventId]);
+
+  if (loading) {
+    return (
+      <p className="loading" role="status">
+        Loading decision history…
+      </p>
+    );
+  }
+
+  if (error) {
+    return (
+      <p className="error" role="alert">
+        {error}
+      </p>
+    );
+  }
+
+  if (decisions.length === 0) {
+    return <p>No decisions have been recorded for this event.</p>;
+  }
+
+  return (
+    <ol className="timeline">
+      {decisions.map((d) => (
+        <li key={d.decision_id}>
+          <span>{humanize(d.decision)}</span>
+          <strong>{d.rationale ?? "No rationale provided."}</strong>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
 
 function Login(): React.JSX.Element {
   const { signIn } = useAuth();
@@ -140,6 +500,10 @@ function Login(): React.JSX.Element {
     </main>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Event queue (Gate 16)
+// ---------------------------------------------------------------------------
 
 function EventQueue({
   onOpen,
@@ -355,6 +719,10 @@ function EventQueue({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Event detail (Gates 16 + 17)
+// ---------------------------------------------------------------------------
+
 function EventDetail({
   eventId,
   onBack,
@@ -453,8 +821,10 @@ function EventDetail({
     "No recommendation has been generated yet.";
   const whyReasons = explanation?.why ?? [];
   const missingEvidence = explanation?.missing_evidence ?? [];
+  const limitations = explanation?.limitations ?? [];
   const riskFactors = assessment?.risk_factors ?? [];
   const confidenceReductions = assessment?.confidence_reductions ?? [];
+  const evidenceErrors = assessment?.evidence_errors ?? {};
   const timeline = [
     { label: "Event received", value: formatTime(event.event_timestamp) },
     {
@@ -481,6 +851,9 @@ function EventDetail({
     mayDecide &&
     assessment !== null &&
     (event.status === "awaiting_review" || event.status === "escalated");
+  const isReviewable =
+    event.status === "awaiting_review" || event.status === "escalated";
+  const isEscalated = event.status === "escalated";
 
   return (
     <section aria-labelledby="detail-title">
@@ -488,6 +861,7 @@ function EventDetail({
         ← Back to queue
       </button>
 
+      {/* ── Event header ─────────────────────────────────────────────── */}
       <div className="section-heading">
         <div>
           <p className="eyebrow">Event detail</p>
@@ -509,6 +883,7 @@ function EventDetail({
         )}
       </div>
 
+      {/* ── Metadata + assessment overview ───────────────────────────── */}
       <div className="meta-grid">
         <div>
           <h2>Event metadata</h2>
@@ -522,6 +897,22 @@ function EventDetail({
               <dd>{event.zone ?? "Not provided"}</dd>
             </div>
             <div>
+              <dt>Facility</dt>
+              <dd>{event.facility_id ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Camera</dt>
+              <dd>{event.camera_id ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Detector confidence</dt>
+              <dd>
+                {event.detector_confidence !== null
+                  ? `${Math.round(event.detector_confidence * 100)}%`
+                  : "Not provided"}
+              </dd>
+            </div>
+            <div>
               <dt>Status</dt>
               <dd>{humanize(event.status)}</dd>
             </div>
@@ -533,7 +924,7 @@ function EventDetail({
         </div>
 
         <div>
-          <h2>Assessment</h2>
+          <h2>Assessment overview</h2>
           {assessment ? (
             <dl>
               <div>
@@ -541,12 +932,16 @@ function EventDetail({
                 <dd>{riskLabel(assessment.risk_level)}</dd>
               </div>
               <div>
+                <dt>Score</dt>
+                <dd>{assessment.risk_score.toFixed(1)}</dd>
+              </div>
+              <div>
                 <dt>Confidence</dt>
                 <dd>{`${Math.round(assessment.confidence_score * 100)}%`}</dd>
               </div>
               <div>
-                <dt>Score</dt>
-                <dd>{assessment.risk_score}</dd>
+                <dt>Policy version</dt>
+                <dd>{assessment.risk_policy_version}</dd>
               </div>
               <div>
                 <dt>Summary</dt>
@@ -562,10 +957,12 @@ function EventDetail({
         </div>
       </div>
 
+      {/* ── Assessment panels ─────────────────────────────────────────── */}
       {assessment && (
         <>
-          <section className="panel">
-            <h2>Risk and confidence</h2>
+          {/* Risk and confidence */}
+          <section className="panel" aria-labelledby="risk-panel-title">
+            <h2 id="risk-panel-title">Risk and confidence</h2>
             <dl>
               <div>
                 <dt>Risk level</dt>
@@ -628,8 +1025,9 @@ function EventDetail({
             )}
           </section>
 
-          <section className="panel">
-            <h2>Evidence and recommendation</h2>
+          {/* Evidence and recommendation */}
+          <section className="panel" aria-labelledby="evidence-panel-title">
+            <h2 id="evidence-panel-title">Evidence and recommendation</h2>
             <p>
               <strong>Recommendation:</strong> {recommendation}
             </p>
@@ -666,10 +1064,38 @@ function EventDetail({
             ) : (
               <p>No missing evidence is flagged for this assessment.</p>
             )}
+
+            {limitations.length > 0 && (
+              <>
+                <h3>Limitations</h3>
+                <ul>
+                  {limitations.map((item, index) => (
+                    <li key={`${item}-${index}`}>{item}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {Object.keys(evidenceErrors).length > 0 && (
+              <>
+                <h3>Evidence retrieval errors</h3>
+                <ul>
+                  {Object.entries(evidenceErrors).map(([source, msg]) => (
+                    <li key={source}>
+                      <strong>{humanize(source)}:</strong> {msg}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </section>
 
-          <section className="panel">
-            <h2>Decision timeline</h2>
+          {/* Agent activity panel (Gate 17) */}
+          <AgentPanel assessment={assessment} />
+
+          {/* Decision timeline */}
+          <section className="panel" aria-labelledby="timeline-panel-title">
+            <h2 id="timeline-panel-title">Decision timeline</h2>
             <ol className="timeline">
               {timeline.map((item) => (
                 <li key={item.label}>
@@ -678,16 +1104,28 @@ function EventDetail({
                 </li>
               ))}
             </ol>
+
+            {/* Decision history — loaded only when assessment exists */}
+            <h3>Decision history</h3>
+            <DecisionHistoryPanel eventId={eventId} />
           </section>
         </>
       )}
 
+      {/* ── Coordinator review panel (Gate 17) ───────────────────────── */}
+      <CoordinatorPanel eventId={eventId} reviewable={isReviewable} />
+
+      {/* ── Escalation panel (Gate 17) ───────────────────────────────── */}
+      <EscalationPanel eventId={eventId} isEscalated={isEscalated} />
+
+      {/* ── Action error ─────────────────────────────────────────────── */}
       {actionError && (
         <div className="error-panel" role="alert">
           <p>{actionError}</p>
         </div>
       )}
 
+      {/* ── Human review decision form ────────────────────────────────── */}
       {canDecide ? (
         <form className="decision-form" onSubmit={submitDecision}>
           <h2>Human review decision</h2>
@@ -729,6 +1167,10 @@ function EventDetail({
     </section>
   );
 }
+
+// ---------------------------------------------------------------------------
+// App shell
+// ---------------------------------------------------------------------------
 
 export default function App(): React.JSX.Element {
   const { user, loading, signOut } = useAuth();

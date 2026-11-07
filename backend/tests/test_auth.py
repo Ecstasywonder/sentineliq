@@ -18,19 +18,24 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import logout as logout_endpoint
+from app.api.v1.endpoints.auth import refresh as refresh_endpoint
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
 from app.models.refresh_token import RefreshToken, RefreshTokenFamily
 from app.models.user import Role, User, UserRole
+from app.schemas.auth import RefreshRequest
 from app.security.dependencies import AuthenticatedUser, get_current_user
 from app.security.passwords import hash_password, verify_password, verify_password_or_dummy
 from app.security.rbac import has_permission, permissions_for_roles
@@ -221,7 +226,8 @@ async def _seed_user(
     return user
 
 
-def _auth_client(db_session: AsyncSession):
+@asynccontextmanager
+async def _auth_client(db_session: AsyncSession):
     """
     Context manager: a raw AsyncClient with only the DB overridden.
     No stub auth — used to test real auth routes (login, refresh).
@@ -230,8 +236,16 @@ def _auth_client(db_session: AsyncSession):
     async def _override_db() -> AsyncGenerator:
         yield db_session
 
+    previous_override = app.dependency_overrides.get(get_db)
     app.dependency_overrides[get_db] = _override_db
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            yield client
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous_override
 
 
 @pytest.mark.asyncio
@@ -375,6 +389,7 @@ async def test_logout_revokes_the_entire_refresh_token_family(
             "/api/v1/auth/token",
             json={"email": email, "password": "pass"},
         )
+        assert login_response.status_code == 200, login_response.text
         original = login_response.json()["refresh_token"]
         refresh_response = await ac.post(
             "/api/v1/auth/refresh",
@@ -472,6 +487,155 @@ async def test_refresh_invalid_token(db_session: AsyncSession) -> None:
         )
     app.dependency_overrides.clear()
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_disabled_user_revokes_every_token_in_family(
+    db_session: AsyncSession,
+) -> None:
+    """Disabling an account invalidates an otherwise valid login session."""
+    await app.state.rate_limiter.reset()
+    email = f"auth_refresh_disabled_{_id()[:8]}@test.com"
+    user = await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        assert login_response.status_code == 200, login_response.text
+        refresh = login_response.json()["refresh_token"]
+        claims = decode_refresh_token_claims(refresh)
+
+        user.is_active = False
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await refresh_endpoint(RefreshRequest(refresh_token=refresh), db_session)
+
+    app.dependency_overrides.clear()
+    assert exc_info.value.status_code == 401
+    family = await db_session.scalar(
+        select(RefreshTokenFamily).where(RefreshTokenFamily.family_id == claims.family_id)
+    )
+    tokens = list(
+        (
+            await db_session.scalars(
+                select(RefreshToken).where(RefreshToken.family_id == claims.family_id)
+            )
+        ).all()
+    )
+    assert family is not None
+    assert family.revoked_at is not None
+    assert tokens
+    assert all(token.revoked_at is not None for token in tokens)
+
+
+@pytest.mark.asyncio
+async def test_refresh_expired_stored_token_revokes_its_family(
+    db_session: AsyncSession,
+) -> None:
+    """Server-side expiry must contain the whole family, even with a signed JWT."""
+    await app.state.rate_limiter.reset()
+    email = f"auth_refresh_expired_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        assert login_response.status_code == 200, login_response.text
+        refresh = login_response.json()["refresh_token"]
+        claims = decode_refresh_token_claims(refresh)
+        stored = await db_session.get(RefreshToken, claims.token_id)
+        assert stored is not None
+        stored.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await refresh_endpoint(RefreshRequest(refresh_token=refresh), db_session)
+
+    app.dependency_overrides.clear()
+    assert exc_info.value.status_code == 401
+    family = await db_session.scalar(
+        select(RefreshTokenFamily).where(RefreshTokenFamily.family_id == claims.family_id)
+    )
+    assert family is not None
+    assert family.revoked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_token_when_its_family_belongs_to_another_user(
+    db_session: AsyncSession,
+) -> None:
+    """A refresh claim cannot be rebound to another user's token family."""
+    await app.state.rate_limiter.reset()
+    first_email = f"auth_refresh_first_{_id()[:8]}@test.com"
+    second_email = f"auth_refresh_second_{_id()[:8]}@test.com"
+    await _seed_user(db_session, first_email, "pass")
+    second_user = await _seed_user(db_session, second_email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": first_email, "password": "pass"},
+        )
+        assert login_response.status_code == 200, login_response.text
+        refresh = login_response.json()["refresh_token"]
+        claims = decode_refresh_token_claims(refresh)
+        family = await db_session.scalar(
+            select(RefreshTokenFamily).where(RefreshTokenFamily.family_id == claims.family_id)
+        )
+        assert family is not None
+        family.user_id = second_user.id
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await refresh_endpoint(RefreshRequest(refresh_token=refresh), db_session)
+
+    app.dependency_overrides.clear()
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_ignores_refresh_token_with_tampered_server_binding(
+    db_session: AsyncSession,
+) -> None:
+    """Logout remains non-enumerating without revoking a mismatched token family."""
+    await app.state.rate_limiter.reset()
+    email = f"auth_logout_binding_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    async with _auth_client(db_session) as ac:
+        login_response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+        assert login_response.status_code == 200, login_response.text
+        refresh = login_response.json()["refresh_token"]
+        claims = decode_refresh_token_claims(refresh)
+        stored = await db_session.get(RefreshToken, claims.token_id)
+        assert stored is not None
+        stored.token_hash = "not-the-presented-token"
+        await db_session.commit()
+
+        logout_result = await logout_endpoint(
+            RefreshRequest(refresh_token=refresh),
+            db_session,
+        )
+
+    app.dependency_overrides.clear()
+    assert logout_result is None
+    family = await db_session.scalar(
+        select(RefreshTokenFamily).where(RefreshTokenFamily.family_id == claims.family_id)
+    )
+    assert family is not None
+    assert family.revoked_at is None
 
 
 @pytest.mark.asyncio

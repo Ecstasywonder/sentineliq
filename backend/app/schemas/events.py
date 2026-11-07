@@ -12,7 +12,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.config import get_settings
 from app.models.event import EVENT_STATUSES, EVENT_TYPES
+from app.security.metadata import sanitize_metadata
 
 # ---------------------------------------------------------------------------
 # Inbound
@@ -74,8 +76,7 @@ class EventIngestRequest(BaseModel):
     def validate_event_type(cls, v: str) -> str:
         if v not in _EVENT_TYPES_SET:
             raise ValueError(
-                f"event_type '{v}' is not recognised. "
-                f"Valid types: {sorted(_EVENT_TYPES_SET)}"
+                f"event_type '{v}' is not recognised. Valid types: {sorted(_EVENT_TYPES_SET)}"
             )
         return v
 
@@ -85,6 +86,24 @@ class EventIngestRequest(BaseModel):
         if not v.strip():
             raise ValueError("event_timestamp must not be empty.")
         return v.strip()
+
+    @field_validator("raw_metadata")
+    @classmethod
+    def validate_raw_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        settings = get_settings()
+        return sanitize_metadata(
+            value,
+            max_bytes=settings.event_raw_metadata_max_bytes,
+            max_depth=settings.event_raw_metadata_max_depth,
+            max_keys=settings.event_raw_metadata_max_keys,
+            max_items=settings.event_raw_metadata_max_items,
+            max_string_bytes=settings.event_raw_metadata_max_string_bytes,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +166,7 @@ class EventResponse(BaseModel):
             thumbnail_url=e.thumbnail_url,
             status=e.status,
             risk=RiskSummary(score=e.risk_score, level=e.risk_level),
-            confidence=ConfidenceSummary(
-                score=e.confidence_score, level=e.confidence_level
-            ),
+            confidence=ConfidenceSummary(score=e.confidence_score, level=e.confidence_level),
             agent_run_id=e.agent_run_id,
             created_at=e.created_at.isoformat() if e.created_at else "",
             updated_at=e.updated_at.isoformat() if e.updated_at else "",

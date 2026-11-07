@@ -14,9 +14,7 @@ VALID_ESCALATION_STATUSES = frozenset(
     {"pending_acknowledgement", "acknowledged", "resolved", "cancelled"}
 )
 
-VALID_DESTINATIONS = frozenset(
-    {"shift_supervisor", "response_team", "security_admin", "external"}
-)
+VALID_DESTINATIONS = frozenset({"shift_supervisor", "response_team", "security_admin", "external"})
 
 VALID_PRIORITIES = frozenset({"low", "medium", "high", "critical"})
 

@@ -1,0 +1,36 @@
+{
+	default_sni {$SENTINELIQ_PUBLIC_HOST}
+}
+
+{$SENTINELIQ_PUBLIC_HOST} {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+
+	@api path /api/v1/*
+	@health path /health
+
+	handle @api {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle @health {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}

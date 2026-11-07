@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.knowledge import KnowledgeSearchResponse
 
 # ---------------------------------------------------------------------------
 # Shared
@@ -206,5 +207,6 @@ class AggregatedEvidence(BaseModel):
     delivery: DeliveryResponse | None = None
     location_policy: LocationPolicyResponse | None = None
     incident_history: IncidentHistoryResponse | None = None
+    knowledge_search: KnowledgeSearchResponse | None = None
     integration_health: IntegrationHealthResponse | None = None
     errors: dict[str, Any] = Field(default_factory=dict)

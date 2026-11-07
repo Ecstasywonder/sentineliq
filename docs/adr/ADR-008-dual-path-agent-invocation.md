@@ -3,7 +3,7 @@
 **Status:** Accepted  
 **Date:** 2026-11-05  
 **Author:** IBM Bob (Principal Architect)  
-**Gate:** 14 (amendment)
+**Historical gate:** 14 (amendment) — **Master Build Prompt Gate 11**
 
 ---
 
@@ -31,8 +31,8 @@ unprovisioned service.
 
 ### Three-path invocation hierarchy
 
-Every agent service (Triage, Context, Explanation, Coordinator) implements
-three invocation paths in strict priority order:
+The Triage, Context, and Explanation backend services implement three
+invocation paths in strict priority order:
 
 ```
 PATH B — watsonx Orchestrate SaaS  (primary — activates when ORCHESTRATE_URL is set)
@@ -42,13 +42,16 @@ PATH A — watsonx.ai Chat API        (verified fallback — activates when WATS
 PATH 0 — Deterministic fallback     (always available — no LLM, no network)
 ```
 
-**Path B is the intended production path.** It is implemented now, tested
-against the expected Orchestrate API contract, and will activate
-automatically when `ORCHESTRATE_URL` is set in the environment.
+**Path B is the intended production path.** It is implemented against IBM's
+documented direct-agent chat-completions contract and has local contract-test
+coverage. Invocation against the project's live tenant remains unverified and
+must not be represented as live-validated until tenant credentials and an
+imported agent are available.
 
-**Path A is the current active path.** It is verified working. It uses the
-same model (`ibm/granite-4-h-small`) and the same prompt as the Orchestrate
-agent definition, so the output contract is identical.
+**Path A is the currently verified remote path.** It uses
+`ibm/granite-4-h-small` and the same task constraints as the corresponding
+backend service. The strict backend output validator is shared across all
+three paths.
 
 **Path 0 always succeeds.** It is the rule-based Python fallback that has
 been present since Gate 14. It mirrors the agent's classification rules
@@ -59,7 +62,8 @@ exactly, making it predictable and fully testable without any network.
 | Variable | Purpose | Path activated |
 |----------|---------|---------------|
 | `ORCHESTRATE_URL` | Orchestrate tenant URL | Path B (when + API key set) |
-| `ORCHESTRATE_API_KEY` | API key for Orchestrate auth | Path B and A |
+| `ORCHESTRATE_API_KEY` | IBM Cloud API key exchanged for an IAM bearer token | Path B (and Path A only as a backwards-compatible fallback) |
+| `ORCHESTRATE_API_VERSION` | Direct-agent API version (`v2` default; `v1_5` supported) | Path B |
 | `WATSONX_BASE_URL` | watsonx.ai ML endpoint | Path A |
 | `WATSONX_API_KEY` | IBM Cloud API key for IAM | Path A |
 | `WATSONX_SPACE_ID` | Space with WML instance | Path A |
@@ -83,24 +87,48 @@ When Orchestrate is provisioned:
 2. Set `ORCHESTRATE_URL=https://<tenant>.ibm-watson-orchestrate.com`
 3. Set `ORCHESTRATE_API_KEY=<api_key>`
 
-`TriageService` will automatically route to Path B. No other code changes required.
+The three backend agent services will automatically route to Path B. A live
+tenant check is still required because agent import state, agent identifiers,
+tenant authorization, and runtime response behavior cannot be proven by local
+contract tests.
 
-Path B uses `ZenApiKey` auth (Orchestrate's own scheme) and calls:
+For IBM Cloud SaaS, Path B exchanges the API key at IBM Cloud IAM and sends
+the resulting short-lived bearer token. `ZenApiKey` is an on-premises auth
+scheme and is not used by this SaaS adapter. Path B calls:
 ```
-POST <ORCHESTRATE_URL>/v1/agents/<agent_id>/run
-  { "input": "<event_metadata_json>" }
+POST <ORCHESTRATE_URL>/v2/orchestrate/<agent_id>/chat/completions
+Authorization: Bearer <iam_access_token>
+
+{
+  "messages": [
+    {"role": "system", "content": "<agent constraints>"},
+    {"role": "user", "content": "<allowlisted input JSON>"}
+  ],
+  "stream": false
+}
 ```
 
-The Orchestrate response is expected in one of:
-- `{ "output": "<text>" }` — Orchestrate native
-- `{ "choices": [{ "message": { "content": "<text>" } }] }` — if Orchestrate proxies chat completions
+The response is parsed as an OpenAI-style `choices[0].message.content`
+payload. Both string content and documented text-part arrays are accepted;
+undocumented `output` or `content` top-level shapes are rejected.
+
+All three backend agent services use `OrchestrateClient`; authentication, endpoint
+construction, response parsing, and non-sensitive telemetry are no longer
+duplicated across service adapters.
+
+The imported `sentinel_coordinator` definition is a separate, read-only review
+agent. It is not invoked by these backend adapters and does not replace the
+transactional workflow coordination performed by `AssessmentService`. Live
+coordinator import and collaborator execution remain acceptance evidence to be
+collected from an Orchestrate tenant.
 
 ### All paths share the same output contract
 
 - System prompt is identical across Path B and Path A.
 - `_parse_and_validate()` applies the same allowlist filtering to all paths.
 - `AgentRun` rows are persisted for all three paths.
-- The `orchestrate_run_id` column stores `path:<B|A|deterministic>` for auditability.
+- The `orchestrate_run_id` column stores
+  `path:<orchestrate|watsonx_ai|deterministic>` for auditability.
 
 ---
 
@@ -108,7 +136,8 @@ The Orchestrate response is expected in one of:
 
 ### Positive
 - No blocking dependency on Orchestrate provisioning.
-- Path B activates automatically when Orchestrate is provisioned — zero code change.
+- Path B activates automatically after the tenant, credentials, and imported
+  agent IDs are configured.
 - Architecture intent is fully preserved and documented.
 - Operators and auditors can distinguish which path produced each triage result.
 - All safety constraints (ADR-003 through ADR-007) hold across all paths.
@@ -136,5 +165,9 @@ The Orchestrate response is expected in one of:
 2. Configure ADK CLI: `orchestrate env activate`.
 3. Import agents: `orchestrate agents import --file agents/triage/agent.yaml`.
 4. Set `ORCHESTRATE_URL` in `.env`.
-5. Verify with `curl <ORCHESTRATE_URL>/v1/agents/sentinel_triage_agent/run`.
-6. Path B activates automatically — no code changes required.
+5. Invoke the imported agent through
+   `POST /v2/orchestrate/<agent_id>/chat/completions` using an IAM bearer token.
+   Record this as live-validated only after a tenant response passes the same
+   strict output validation as the fallback paths.
+6. Record the imported agent IDs in configuration and run the backend's strict
+   contract tests against the live tenant before declaring Path B validated.

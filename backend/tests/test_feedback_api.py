@@ -64,10 +64,14 @@ def _uid() -> str:
 
 async def _seed_event(session: AsyncSession, status: str = "awaiting_review") -> SecurityEvent:
     event = SecurityEvent(
-        id=_uid(), provider_event_id=f"prov-{_uid()}",
-        source_adapter="simulator", event_type="person_detected",
+        id=_uid(),
+        provider_event_id=f"prov-{_uid()}",
+        source_adapter="simulator",
+        event_type="person_detected",
         event_timestamp="2026-11-03T22:00:00Z",
-        location_id=_LOC, facility_id=_FAC, status=status,
+        location_id=_LOC,
+        facility_id=_FAC,
+        status=status,
     )
     session.add(event)
     await session.flush()
@@ -102,16 +106,12 @@ async def _post_feedback(
 
 
 class TestPostFeedbackHappyPath:
-    async def test_returns_201(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_201(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         resp = await _post_feedback(client, event.id)
         assert resp.status_code == 201, resp.text
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         resp = await _post_feedback(client, event.id)
         data = resp.json()
@@ -138,9 +138,7 @@ class TestPostFeedbackHappyPath:
         resp = await _post_feedback(client, event.id, recommendation_accurate=False)
         assert resp.json()["recommendation_accurate"] is False
 
-    async def test_outcome_stored(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_outcome_stored(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         resp = await _post_feedback(client, event.id, outcome="false_positive")
         assert resp.json()["outcome"] == "false_positive"
@@ -152,9 +150,7 @@ class TestPostFeedbackHappyPath:
         resp = await _post_feedback(client, event.id, missing_context="No work order data")
         assert resp.json()["missing_context"] == "No work order data"
 
-    async def test_notes_stored(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_notes_stored(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         resp = await _post_feedback(client, event.id, notes="Very helpful recommendation")
         assert resp.json()["notes"] == "Very helpful recommendation"
@@ -192,9 +188,7 @@ class TestPostFeedbackHappyPath:
         resp = await _post_feedback(client, event.id)
         assert resp.status_code == 201
 
-    async def test_audit_event_created(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_audit_event_created(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         await _post_feedback(client, event.id)
 
@@ -206,12 +200,11 @@ class TestPostFeedbackHappyPath:
         result = await db_session.execute(stmt)
         assert result.scalar_one_or_none() is not None
 
-    async def test_audit_details_json(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_audit_details_json(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         await _post_feedback(
-            client, event.id,
+            client,
+            event.id,
             outcome="authorized_activity",
             missing_context="Contractor badge data missing",
         )
@@ -235,9 +228,7 @@ class TestPostFeedbackHappyPath:
 
 
 class TestGetFeedbackHappyPath:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/feedback")
         assert resp.status_code == 200, resp.text
@@ -270,9 +261,7 @@ class TestGetFeedbackHappyPath:
         resp = await client.get(f"/api/v1/events/{event.id}/feedback")
         assert resp.json()["total"] == 2
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_event(db_session)
         await _post_feedback(client, event.id)
         resp = await client.get(f"/api/v1/events/{event.id}/feedback")

@@ -17,7 +17,9 @@ GET /api/v1/tools/integration-health   -- adapter health status
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +28,14 @@ from app.integrations.access_control import MockAccessControlAdapter
 from app.integrations.delivery import MockDeliveryAdapter
 from app.integrations.schedule import MockScheduleAdapter
 from app.integrations.work_order import MockWorkOrderAdapter
+from app.models.assessment import RiskAssessment
+from app.models.event import SecurityEvent
 from app.models.incident import IncidentHistory
 from app.models.integration import IntegrationHealth
+from app.models.recommendation import Recommendation
 from app.models.security_rule import SecurityRule
+from app.schemas.explanation import AssessmentBundleResponse
+from app.schemas.knowledge import KnowledgeSearchResponse
 from app.schemas.tools import (
     AccessEventRecord,
     AccessEventsResponse,
@@ -47,11 +54,43 @@ from app.schemas.tools import (
     WorkOrdersResponse,
 )
 from app.security.dependencies import require_permission
+from app.services.knowledge_retrieval import KnowledgeRetrievalService
 
 router = APIRouter()
 
 _PERM = "tools:read"
 _MAX_LIMIT = 200
+
+
+def _json_object(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _json_list(raw: str | None) -> list[dict]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _json_string_list(raw: str | None) -> list[str]:
+    """Return only string values from a persisted JSON array."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +99,71 @@ _MAX_LIMIT = 200
 
 
 @router.get(
+    "/assessment-bundle",
+    operation_id="get_assessment_bundle",
+    response_model=AssessmentBundleResponse,
+    summary="Retrieve the persisted assessment reconstruction bundle",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_assessment_bundle(
+    event_id: str = Query(..., max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AssessmentBundleResponse:
+    event = await session.get(SecurityEvent, event_id)
+    assessment_result = await session.execute(
+        select(RiskAssessment).where(RiskAssessment.event_id == event_id)
+    )
+    assessment = assessment_result.scalar_one_or_none()
+    if event is None or assessment is None:
+        raise HTTPException(status_code=404, detail="Assessment bundle not found.")
+    recommendation_result = await session.execute(
+        select(Recommendation).where(Recommendation.event_id == event_id)
+    )
+    recommendation = recommendation_result.scalar_one_or_none()
+
+    return AssessmentBundleResponse(
+        event_id=event_id,
+        event_status=event.status,
+        risk_score=assessment.risk_score,
+        risk_level=assessment.risk_level,
+        risk_policy_version=assessment.risk_policy_version,
+        risk_factors=_json_list(assessment.risk_factors_json),
+        confidence_score=assessment.confidence_score,
+        confidence_level=assessment.confidence_level,
+        triage=_json_object(assessment.triage_result_json),
+        context=_json_object(assessment.context_result_json),
+        explanation=_json_object(assessment.explanation_result_json),
+        recommendation_id=recommendation.id if recommendation else None,
+        recommendation=(
+            {
+                "id": recommendation.id,
+                "summary": recommendation.summary,
+                "recommended_action": recommendation.recommended_action,
+                "why": _json_list(recommendation.why_json),
+                "missing_evidence": _json_string_list(recommendation.missing_evidence_json),
+                "limitations": _json_string_list(recommendation.limitations_json),
+                "requires_human_review": recommendation.requires_human_review,
+                "risk_level": recommendation.risk_level,
+                "risk_score": recommendation.risk_score,
+                "confidence_score": recommendation.confidence_score,
+                "agent_run_id": recommendation.agent_run_id,
+                "generated_at": recommendation.generated_at,
+            }
+            if recommendation is not None
+            else {}
+        ),
+        evidence_errors={
+            str(key): str(value)
+            for key, value in _json_object(assessment.evidence_errors_json).items()
+        },
+        workflow_state=_json_object(assessment.workflow_state_json),
+        assessed_at=assessment.assessed_at,
+    )
+
+
+@router.get(
     "/access-events",
+    operation_id="get_access_events",
     response_model=AccessEventsResponse,
     summary="Badge / access-control events for a location",
     dependencies=[Depends(require_permission(_PERM))],
@@ -91,6 +194,7 @@ async def get_access_events(
 
 @router.get(
     "/schedule",
+    operation_id="get_schedule",
     response_model=ScheduleResponse,
     summary="Schedule context for a location or facility",
     dependencies=[Depends(require_permission(_PERM))],
@@ -124,6 +228,7 @@ async def get_schedule(
 
 @router.get(
     "/work-orders",
+    operation_id="get_work_orders",
     response_model=WorkOrdersResponse,
     summary="Active work orders for a location",
     dependencies=[Depends(require_permission(_PERM))],
@@ -157,6 +262,7 @@ async def get_work_orders(
 
 @router.get(
     "/delivery",
+    operation_id="get_delivery",
     response_model=DeliveryResponse,
     summary="Delivery schedule for a location",
     dependencies=[Depends(require_permission(_PERM))],
@@ -187,6 +293,7 @@ async def get_delivery(
 
 @router.get(
     "/location-policy",
+    operation_id="get_location_policy",
     response_model=LocationPolicyResponse,
     summary="Active security rules for a location",
     dependencies=[Depends(require_permission(_PERM))],
@@ -199,15 +306,11 @@ async def get_location_policy(
     stmt = (
         select(SecurityRule)
         .where(SecurityRule.is_active.is_(True))
-        .where(
-            (SecurityRule.location_id == location_id)
-            | (SecurityRule.location_id.is_(None))
-        )
+        .where((SecurityRule.location_id == location_id) | (SecurityRule.location_id.is_(None)))
     )
     if facility_id:
         stmt = stmt.where(
-            (SecurityRule.facility_id == facility_id)
-            | (SecurityRule.facility_id.is_(None))
+            (SecurityRule.facility_id == facility_id) | (SecurityRule.facility_id.is_(None))
         )
     result = await session.execute(stmt)
     rows = result.scalars().all()
@@ -240,6 +343,7 @@ async def get_location_policy(
 
 @router.get(
     "/incident-history",
+    operation_id="get_incident_history",
     response_model=IncidentHistoryResponse,
     summary="Historical security incidents at a location",
     dependencies=[Depends(require_permission(_PERM))],
@@ -287,12 +391,60 @@ async def get_incident_history(
 
 
 # ---------------------------------------------------------------------------
+# 6b. Hybrid incident / policy knowledge search (Gate 8)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/knowledge-search",
+    operation_id="search_knowledge",
+    response_model=KnowledgeSearchResponse,
+    summary="Hybrid semantic and metadata search over incidents and policies",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def search_knowledge(
+    q: str = Query(..., min_length=2, max_length=500, description="Natural-language query"),
+    facility_id: str | None = Query(None, max_length=36),
+    location_id: str | None = Query(None, max_length=128),
+    event_type: str | None = Query(None, max_length=64),
+    severity: str | None = Query(None, max_length=16),
+    occurred_from: str | None = Query(None, max_length=40),
+    occurred_to: str | None = Query(None, max_length=40),
+    include_incidents: bool = Query(True),
+    include_policies: bool = Query(True),
+    limit: int = Query(10, ge=1, le=50),
+    session: AsyncSession = Depends(get_db),
+) -> KnowledgeSearchResponse:
+    """Return ranked, citable records without executing retrieved text.
+
+    Each result carries a stable evidence ID and an explicit
+    ``untrusted_evidence`` trust-boundary marker. Prompt-like text is retained
+    as evidence but flagged so downstream agents cannot mistake it for control
+    instructions.
+    """
+    service = KnowledgeRetrievalService(session)
+    return await service.search(
+        q,
+        facility_id=facility_id,
+        location_id=location_id,
+        event_type=event_type,
+        severity=severity,
+        occurred_from=occurred_from,
+        occurred_to=occurred_to,
+        include_incidents=include_incidents,
+        include_policies=include_policies,
+        limit=limit,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 7. Integration Health
 # ---------------------------------------------------------------------------
 
 
 @router.get(
     "/integration-health",
+    operation_id="get_integration_health",
     response_model=IntegrationHealthResponse,
     summary="Adapter health status for all evidence sources",
     dependencies=[Depends(require_permission(_PERM))],

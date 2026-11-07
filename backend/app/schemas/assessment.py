@@ -4,9 +4,12 @@ Pydantic schemas for the Risk Assessment API — Gate 8 / Triage Gate 14.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.schemas.context import ContextResultDetail
+from app.schemas.explanation import ExplanationResultDetail, WhyReason
 from app.schemas.triage import TriageResultDetail
 
 # ---------------------------------------------------------------------------
@@ -58,6 +61,23 @@ class ConfidenceReductionDetail(BaseModel):
     detail: str = ""
 
 
+class RecommendationDetail(BaseModel):
+    """Canonical recommendation persisted for an assessed event."""
+
+    id: str
+    summary: str
+    recommended_action: str
+    why: list[WhyReason] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    requires_human_review: bool
+    risk_level: str
+    risk_score: float
+    confidence_score: float
+    agent_run_id: str | None = None
+    generated_at: str
+
+
 class AssessmentResponse(BaseModel):
     """Full assessment bundle returned by POST /events/{id}/assess."""
 
@@ -69,6 +89,14 @@ class AssessmentResponse(BaseModel):
 
     # Context (agent evidence interpretation — Gate 15)
     context: ContextResultDetail | None = None
+
+    # Explanation (grounded operator narrative — Master Build Prompt Gate 13)
+    explanation: ExplanationResultDetail | None = None
+
+    # Canonical, event-bound recommendation derived from the explanation.
+    # It is the recommendation a later human decision references by default.
+    recommendation_id: str | None = None
+    recommendation: RecommendationDetail | None = None
 
     # Risk (deterministic, ADR-003)
     risk_score: float
@@ -133,6 +161,14 @@ class AssessmentRetrievalResponse(BaseModel):
     confidence_reductions: list[ConfidenceReductionDetail]
     sources_available: int
     sources_required: int
+
+    triage: TriageResultDetail | None = None
+    context: ContextResultDetail | None = None
+    explanation: ExplanationResultDetail | None = None
+    recommendation_id: str | None = None
+    recommendation: RecommendationDetail | None = None
+    evidence_errors: dict[str, str] = Field(default_factory=dict)
+    workflow_state: dict[str, Any] = Field(default_factory=dict)
 
     assessed_at: str
     agent_run_id: str | None = None

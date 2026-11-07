@@ -8,7 +8,11 @@ audit trail entry.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+from app.schemas.explanation import WhyReason
 
 # Valid decision types (mirrors DECISION_TYPES in app/models/decision.py)
 VALID_DECISIONS = frozenset(
@@ -42,9 +46,7 @@ class DecisionRequest(BaseModel):
 
     decision: str = Field(
         ...,
-        description=(
-            f"Operator decision type. Valid values: {sorted(VALID_DECISIONS)}"
-        ),
+        description=(f"Operator decision type. Valid values: {sorted(VALID_DECISIONS)}"),
     )
     rationale: str | None = Field(
         None,
@@ -66,6 +68,25 @@ class DecisionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RecommendationSnapshot(BaseModel):
+    """Immutable recommendation values captured when a decision is recorded."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    recommendation_id: str
+    event_id: str
+    summary: str
+    recommended_action: str
+    why: list[WhyReason]
+    missing_evidence: list[str]
+    limitations: list[str]
+    requires_human_review: bool
+    risk_level: str
+    risk_score: float
+    confidence_score: float
+    agent_run_id: str | None
+    generated_at: str
+
+
 class DecisionResponse(BaseModel):
     """
     Single operator decision returned by POST or GET
@@ -77,6 +98,7 @@ class DecisionResponse(BaseModel):
     decision: str
     rationale: str | None
     recommendation_id: str | None
+    recommendation_snapshot: RecommendationSnapshot | None = None
     is_override: bool
     decided_by: str
     decided_by_role: str

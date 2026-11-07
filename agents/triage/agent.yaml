@@ -6,9 +6,11 @@
 ## The agent categorises a normalised security event and identifies what
 ## contextual evidence is required.  It does NOT make enforcement decisions.
 ##
-## Import command (once ADK is configured):
-##   orchestrate agents import --file agents/triage/agent.yaml
+## Import command (run via agents/import-all.sh after tools):
+##   orchestrate agents import -f agents/triage/agent.yaml
 
+spec_version: v1
+kind: native
 name: sentinel_triage_agent
 display_name: "SentinelIQ Triage Agent"
 description: >
@@ -17,9 +19,11 @@ description: >
   This agent does NOT make risk assessments, enforcement recommendations,
   or identity claims.  It only classifies and routes.
 
-model: ibm/granite-3-3-8b-instruct
+llm: watsonx/ibm/granite-3-3-8b-instruct
+style: react_core
+collaborators: []
 
-# Tool schemas are registered separately — see agents/triage/tools/
+# The tool contract is generated from FastAPI by agents/generate_tool_openapi.py.
 tools:
   - get_event_detail
 
@@ -100,8 +104,9 @@ instructions: |
     "triage_rationale": "<one-sentence neutral explanation>"
   }
 
-output_schema:
+structured_output:
   type: object
+  additionalProperties: false
   required:
     - event_id
     - category
@@ -111,6 +116,8 @@ output_schema:
   properties:
     event_id:
       type: string
+      minLength: 1
+      maxLength: 128
     category:
       type: string
       enum:
@@ -123,12 +130,32 @@ output_schema:
         - unclassified
     urgency_signals:
       type: array
+      uniqueItems: true
       items:
         type: string
+        enum:
+          - after_hours
+          - restricted_zone
+          - forced_entry
+          - no_camera_coverage
+          - repeated_event
+          - low_detector_confidence
+          - missing_event_metadata
     required_context:
       type: array
+      uniqueItems: true
       items:
         type: string
+        enum:
+          - access_control
+          - schedule
+          - location_policy
+          - incident_history
+          - work_orders
+          - delivery_context
+          - visitor_context
+          - integration_health
     triage_rationale:
       type: string
+      minLength: 1
       maxLength: 512

@@ -35,6 +35,7 @@ from app.schemas.escalation import (
 )
 from app.schemas.events import ErrorDetail
 from app.security.dependencies import AuthenticatedUser, require_permission
+from app.security.rbac import has_permission
 from app.services.escalation_service import (
     EscalationService,
     InvalidEscalationTransitionError,
@@ -69,7 +70,7 @@ async def create_escalation(
     event_id: str,
     body: EscalationCreateRequest,
     session: AsyncSession = Depends(get_db),
-    actor: AuthenticatedUser = Depends(require_permission("events:decide")),
+    actor: AuthenticatedUser = Depends(require_permission("events:escalate")),
 ) -> EscalationResponse:
     """
     Create an escalation record for a security event.
@@ -93,8 +94,7 @@ async def create_escalation(
             status_code=400,
             detail=ErrorDetail(
                 code="INVALID_PRIORITY",
-                message=f"Unknown priority '{body.priority}'. "
-                f"Valid: {sorted(VALID_PRIORITIES)}",
+                message=f"Unknown priority '{body.priority}'. Valid: {sorted(VALID_PRIORITIES)}",
             ).model_dump(),
         )
 
@@ -194,7 +194,7 @@ async def update_escalation(
     event_id: str,
     body: EscalationUpdateRequest,
     session: AsyncSession = Depends(get_db),
-    actor: AuthenticatedUser = Depends(require_permission("events:decide")),
+    actor: AuthenticatedUser = Depends(require_permission("events:read")),
 ) -> EscalationResponse:
     """
     Advance an escalation to a new status.
@@ -213,6 +213,18 @@ async def update_escalation(
                 code="INVALID_ESCALATION_STATUS",
                 message=f"Unknown status '{body.status}'. "
                 f"Valid: {sorted(VALID_ESCALATION_STATUSES)}",
+            ).model_dump(),
+        )
+
+    required_permission = (
+        "events:respond" if body.status in {"acknowledged", "resolved"} else "events:override"
+    )
+    if not has_permission(actor.roles, required_permission):
+        raise HTTPException(
+            status_code=403,
+            detail=ErrorDetail(
+                code="FORBIDDEN",
+                message=f"Permission '{required_permission}' required.",
             ).model_dump(),
         )
 

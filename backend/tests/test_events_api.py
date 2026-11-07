@@ -12,9 +12,12 @@ Tests cover:
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
+from app.models.event import SecurityEvent
 from app.services.event_lifecycle import (
     InvalidTransitionError,
     allowed_transitions,
@@ -313,6 +316,32 @@ async def test_status_transition_event_not_found(client: AsyncClient) -> None:
         json={"status": "assessing"},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_status_transition_cannot_bypass_human_decision(
+    client: AsyncClient, db_session
+) -> None:
+    event = SecurityEvent(
+        id=str(uuid.uuid4()),
+        provider_event_id=f"prov-{uuid.uuid4()}",
+        source_adapter="simulator",
+        event_type="motion_detected",
+        event_timestamp="2026-11-03T10:00:00Z",
+        location_id="loc-status-guard",
+        status="awaiting_review",
+    )
+    db_session.add(event)
+    await db_session.flush()
+
+    resp = await client.patch(
+        f"/api/v1/events/{event.id}/status",
+        json={"status": "closed", "reason": "bypass attempt"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "DECISION_REQUIRED"
+    await db_session.refresh(event)
+    assert event.status == "awaiting_review"
 
 
 # ===========================================================================

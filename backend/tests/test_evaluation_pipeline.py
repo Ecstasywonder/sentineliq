@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Make evaluations/scoring importable
 sys.path.insert(0, str(Path(__file__).parents[2] / "evaluations" / "scoring"))
 
-from scorer import load_dataset  # noqa: E402
+from scorer import load_dataset
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,9 +53,7 @@ async def test_triage_never_raises_on_eval_case(
     try:
         result = await svc.run(f"eval-nraise-{case['case_id']}", meta)
     except Exception as exc:
-        pytest.fail(
-            f"{case['case_id']}: TriageService.run raised {type(exc).__name__}: {exc}"
-        )
+        pytest.fail(f"{case['case_id']}: TriageService.run raised {type(exc).__name__}: {exc}")
     assert result is not None, f"{case['case_id']}: triage returned None"
 
 
@@ -157,9 +155,7 @@ async def test_confidence_independent_of_risk_all_eval_cases(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "case", _CASES[:15], ids=[c["case_id"] for c in _CASES[:15]]
-)
+@pytest.mark.parametrize("case", _CASES[:15], ids=[c["case_id"] for c in _CASES[:15]])
 async def test_evidence_aggregator_never_raises_on_eval_case(
     case: dict[str, Any], db_session: AsyncSession
 ) -> None:

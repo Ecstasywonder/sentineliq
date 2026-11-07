@@ -21,7 +21,7 @@ from typing import Any
 # Ensure scorer.py is importable
 sys.path.insert(0, str(Path(__file__).parent))
 
-from scorer import (  # noqa: E402 (path manipulation required before import)
+from scorer import (
     CaseResult,
     CheckResult,
     EvalReport,
@@ -92,9 +92,7 @@ def test_scorer_risk_ranges_are_valid() -> None:
         if rr is not None:
             assert len(rr) == 2, f"{case['case_id']}: risk_range must have 2 elements"
             lo, hi = rr
-            assert 0 <= lo <= hi <= 100, (
-                f"{case['case_id']}: invalid risk_range {rr}"
-            )
+            assert 0 <= lo <= hi <= 100, f"{case['case_id']}: invalid risk_range {rr}"
 
 
 def test_scorer_confidence_ranges_are_valid() -> None:
@@ -104,9 +102,7 @@ def test_scorer_confidence_ranges_are_valid() -> None:
         if cr is not None:
             assert len(cr) == 2, f"{case['case_id']}: confidence_range must have 2 elements"
             lo, hi = cr
-            assert 0.0 <= lo <= hi <= 1.0, (
-                f"{case['case_id']}: invalid confidence_range {cr}"
-            )
+            assert 0.0 <= lo <= hi <= 1.0, f"{case['case_id']}: invalid confidence_range {cr}"
 
 
 def test_scorer_all_categories_from_spec_covered() -> None:
@@ -170,7 +166,8 @@ def _build_actual(
         "confidence_score": confidence_score,
         "confidence_level": confidence_level,
         "confidence_reductions": confidence_reductions or [],
-        "required_context": required_context or ["access_control", "schedule", "location_policy", "incident_history"],
+        "required_context": required_context
+        or ["access_control", "schedule", "location_policy", "incident_history"],
         "human_review_required": True,
         "event_status": "awaiting_review",
         "risk_source": risk_source,
@@ -246,7 +243,9 @@ def test_scorer_score_case_prohibited_behavior_detected() -> None:
     )
     actual["autonomous_action_taken"] = True  # VIOLATION
     result = score_case(case, actual)
-    prohibited_check = next(c for c in result.checks if c.check_name == "prohibited_behavior_absent")
+    prohibited_check = next(
+        c for c in result.checks if c.check_name == "prohibited_behavior_absent"
+    )
     assert not prohibited_check.passed
 
 

@@ -288,8 +288,8 @@ integration validation remain outstanding.
 
 | Validation | Result | Environment / notes |
 |------------|--------|----------------------|
-| Backend test suite | 533 passed | EC2 candidate worktree, Gates 14–16 validation |
-| Backend coverage | 90.48% | EC2 candidate worktree |
+| Backend test suite | 537 passed | EC2 Python 3.11 candidate worktree, Gates 14–16 validation |
+| Backend coverage | 90.39% | EC2 Python 3.11 with greenlet-aware tracing; 85% gate passed |
 | `ruff check app/ tests/` | Passed | EC2 candidate worktree |
 | `ruff format --check app/ tests/` | Passed across 114 files | EC2 candidate worktree |
 | PostgreSQL migration cycle | Passed | Fresh cycle plus released legacy-stamp upgrade to `0004`; 29 public tables and JSON snapshot column on EC2 |
@@ -297,7 +297,7 @@ integration validation remain outstanding.
 | Frontend container path | Passed | EC2 image build; SPA 200; same-origin protected API proxy returned expected 401 |
 | Container secret boundary | Passed | Scratch image builds; runtime `.env` and key material excluded from backend image |
 | Frontend audit | 0 production vulnerabilities; 0 high/critical overall | Six moderate dev-only transitive findings remain |
-| GitHub Actions | Failed without creating jobs | No job logs were available; no branch protection is configured |
+| GitHub Actions diagnostic | Workflow jobs now materialize; frontend and secret scan passed, backend's 533 tests passed | The Python 3.11 coverage tracer initially under-counted SQLAlchemy greenlet paths; the corrected tracing configuration and four auth regression tests pass the exact CI command on EC2. Final pushed run is required before merge |
 
 This evidence applies to an unmerged candidate worktree and does not change the
 strict completion rule. Gate 14 additionally requires a live Orchestrate

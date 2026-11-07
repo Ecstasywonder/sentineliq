@@ -33,7 +33,7 @@ reviewed, validated in CI, and merged into `main`.
 | Area | Result |
 |------|--------|
 | Backend quality | `ruff check` passed; `ruff format --check` passed across 114 files |
-| Backend tests | 533 passed; 90.48% coverage |
+| Backend tests | 537 passed; 90.39% coverage on Python 3.11 with greenlet-aware tracing; the 85% gate passed |
 | Database migration | Fresh upgrade → downgrade → upgrade and simulated released legacy-stamp upgrade reached Alembic head `0004`; 29 public tables and the JSON decision-snapshot column are present |
 | Frontend quality | fresh install, format check, TypeScript check, ESLint, 14 unit tests, and production build passed |
 | Frontend dependencies | production audit found 0 vulnerabilities; full audit has 0 high/critical findings and 6 moderate dev-only transitive findings |

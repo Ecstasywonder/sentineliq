@@ -44,15 +44,17 @@ from __future__ import annotations
 
 import json
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditEvent
 from app.models.decision import OperatorDecision
 from app.models.event import SecurityEvent
+from app.models.recommendation import Recommendation
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
 from app.models.user import User
 from app.security.dependencies import AuthenticatedUser, get_current_user
@@ -73,12 +75,14 @@ def _uid() -> str:
 
 
 def _thresholds_json() -> str:
-    return json.dumps({
-        "low":      {"min": 0.0,  "max": 29.0},
-        "medium":   {"min": 30.0, "max": 59.0},
-        "high":     {"min": 60.0, "max": 99.0},
-        "critical": {"min": 100.0, "max": None},
-    })
+    return json.dumps(
+        {
+            "low": {"min": 0.0, "max": 29.0},
+            "medium": {"min": 30.0, "max": 59.0},
+            "high": {"min": 60.0, "max": 99.0},
+            "critical": {"min": 100.0, "max": None},
+        }
+    )
 
 
 async def _seed_policy(session: AsyncSession) -> RiskPolicy:
@@ -89,23 +93,33 @@ async def _seed_policy(session: AsyncSession) -> RiskPolicy:
         return existing
 
     policy = RiskPolicy(
-        id=_uid(), version="1.0", name="Default v1.0",
-        is_active=True, thresholds_json=_thresholds_json(),
+        id=_uid(),
+        version="1.0",
+        name="Default v1.0",
+        is_active=True,
+        thresholds_json=_thresholds_json(),
     )
     session.add(policy)
     await session.flush()
     for fid, label, weight in [
         ("after_hours_access", "After Hours Access", 40.0),
-        ("unverified_person",  "Unverified Person",  50.0),
-        ("no_work_order",      "No Work Order",      20.0),
+        ("unverified_person", "Unverified Person", 50.0),
+        ("no_work_order", "No Work Order", 20.0),
         ("no_scheduled_entry", "No Scheduled Entry", 20.0),
-        ("known_incident_area","Known Incident Area",30.0),
-        ("critical_zone",      "Critical Zone",      40.0),
+        ("known_incident_area", "Known Incident Area", 30.0),
+        ("critical_zone", "Critical Zone", 40.0),
     ]:
-        session.add(RiskPolicyFactor(
-            id=_uid(), policy_id=policy.id, factor_id=fid,
-            label=label, weight=weight, direction="increase", is_active=True,
-        ))
+        session.add(
+            RiskPolicyFactor(
+                id=_uid(),
+                policy_id=policy.id,
+                factor_id=fid,
+                label=label,
+                weight=weight,
+                direction="increase",
+                is_active=True,
+            )
+        )
     await session.flush()
     return policy
 
@@ -159,9 +173,7 @@ async def _post_decision(
 
 
 class TestPostDecisionHappyPath:
-    async def test_accept_returns_201(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_accept_returns_201(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_awaiting(client, db_session)
         resp = await _post_decision(client, event.id, "accept")
         assert resp.status_code == 201, resp.text
@@ -213,9 +225,7 @@ class TestPostDecisionHappyPath:
         assert resp.status_code == 201
         assert resp.json()["event_status"] == "context_incomplete"
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_awaiting(client, db_session)
         resp = await _post_decision(client, event.id, "accept")
         data = resp.json()
@@ -269,9 +279,7 @@ class TestPostDecisionHappyPath:
         data = resp.json()
         assert "risk_at_decision" in data  # field always present
 
-    async def test_db_row_persisted(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_db_row_persisted(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_awaiting(client, db_session)
         resp = await _post_decision(client, event.id, "accept")
         decision_id = resp.json()["decision_id"]
@@ -280,6 +288,58 @@ class TestPostDecisionHappyPath:
         assert row is not None
         assert row.event_id == event.id
         assert row.decision == "accept"
+
+    async def test_omitted_recommendation_uses_event_canonical_recommendation(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_awaiting(client, db_session)
+        recommendation = await db_session.scalar(
+            select(Recommendation).where(Recommendation.event_id == event.id)
+        )
+        assert recommendation is not None
+
+        response = await _post_decision(client, event.id, "accept")
+        assert response.status_code == 201, response.text
+        assert response.json()["recommendation_id"] == recommendation.id
+
+        decision = await db_session.get(OperatorDecision, response.json()["decision_id"])
+        assert decision is not None
+        assert decision.recommendation_id == recommendation.id
+        assert decision.recommendation_snapshot is not None
+        assert decision.recommendation_snapshot["recommendation_id"] == recommendation.id
+
+    async def test_decision_snapshot_survives_canonical_recommendation_reassessment(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_awaiting(client, db_session)
+
+        first_decision = await _post_decision(client, event.id, "request_context")
+        assert first_decision.status_code == 201, first_decision.text
+        original_snapshot = first_decision.json()["recommendation_snapshot"]
+        assert original_snapshot is not None
+        assert "person_detected" in original_snapshot["summary"]
+
+        # Re-assessment updates the one canonical Recommendation row in place.
+        event.event_type = "forced_door"
+        db_session.add(event)
+        await db_session.flush()
+        reassessment = await client.post(f"/api/v1/events/{event.id}/assess")
+        assert reassessment.status_code == 200, reassessment.text
+
+        canonical = await db_session.scalar(
+            select(Recommendation).where(Recommendation.event_id == event.id)
+        )
+        assert canonical is not None
+        await db_session.refresh(canonical)
+        assert canonical.id == original_snapshot["recommendation_id"]
+        assert "forced_door" in canonical.summary
+        assert canonical.summary != original_snapshot["summary"]
+
+        history = await client.get(f"/api/v1/events/{event.id}/decisions")
+        assert history.status_code == 200, history.text
+        historical = history.json()["items"][0]
+        assert historical["recommendation_id"] == canonical.id
+        assert historical["recommendation_snapshot"] == original_snapshot
 
     async def test_event_status_updated_in_db(
         self, client: AsyncClient, db_session: AsyncSession
@@ -297,9 +357,7 @@ class TestPostDecisionHappyPath:
 
 
 class TestDecisionAuditTrail:
-    async def test_audit_event_created(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_audit_event_created(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_awaiting(client, db_session)
         await _post_decision(client, event.id, "accept")
 
@@ -348,6 +406,7 @@ class TestDecisionAuditTrail:
         assert details["target_status"] == "closed"
         assert "is_override" in details
         assert "rationale_provided" in details
+        assert details["recommendation_snapshot"]["recommendation_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +415,7 @@ class TestDecisionAuditTrail:
 
 
 class TestGetLatestDecision:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_awaiting(client, db_session)
         await _post_decision(client, event.id, "accept")
         resp = await client.get(f"/api/v1/events/{event.id}/decision")
@@ -375,17 +432,13 @@ class TestGetLatestDecision:
         assert get_data["decision"] == post_data["decision"]
         assert get_data["decided_at"] == post_data["decided_at"]
 
-    async def test_404_no_decision(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_no_decision(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_awaiting(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/decision")
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "DECISION_NOT_FOUND"
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get("/api/v1/events/does-not-exist/decision")
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "EVENT_NOT_FOUND"
@@ -448,9 +501,7 @@ class TestGetDecisionHistory:
         assert data["items"][0]["decision"] == "accept"
         assert data["items"][1]["decision"] == "request_context"
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get("/api/v1/events/does-not-exist/decisions")
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "EVENT_NOT_FOUND"
@@ -462,6 +513,50 @@ class TestGetDecisionHistory:
 
 
 class TestPostDecisionErrors:
+    async def test_stale_concurrent_decision_loses_cas_without_persisting(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """A request that read pre-decision state cannot write a second outcome."""
+        from app.services.decision_service import DecisionService
+
+        event = await _seed_awaiting(client, db_session)
+        stale_event = SimpleNamespace(
+            status="awaiting_review",
+            risk_level=event.risk_level,
+            confidence_score=event.confidence_score,
+        )
+
+        winner = await _post_decision(client, event.id, "accept")
+        assert winner.status_code == 201, winner.text
+
+        async def _load_stale_event(self, event_id: str):
+            assert event_id == event.id
+            return stale_event
+
+        monkeypatch.setattr(DecisionService, "_load_event", _load_stale_event)
+        loser = await _post_decision(client, event.id, "dismiss")
+        assert loser.status_code == 409, loser.text
+        assert "changed while this decision was being recorded" in loser.text
+
+        decision_count = await db_session.scalar(
+            select(func.count())
+            .select_from(OperatorDecision)
+            .where(OperatorDecision.event_id == event.id)
+        )
+        audit_count = await db_session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.event_id == event.id,
+                AuditEvent.action == "human_decision",
+            )
+        )
+        assert decision_count == 1
+        assert audit_count == 1
+
     async def test_400_invalid_decision_type(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
@@ -473,9 +568,7 @@ class TestPostDecisionErrors:
         assert resp.status_code == 400
         assert resp.json()["detail"]["code"] == "INVALID_DECISION"
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.post(
             "/api/v1/events/does-not-exist/decision",
             json={"decision": "accept"},
@@ -528,6 +621,28 @@ class TestPostDecisionErrors:
             json={"decision": "accept"},
         )
         assert resp.status_code == 409
+
+    async def test_409_rejects_recommendation_from_another_event(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        target_event = await _seed_awaiting(client, db_session, location_id="loc-target")
+        other_event = await _seed_awaiting(client, db_session, location_id="loc-other")
+        other_recommendation = await db_session.scalar(
+            select(Recommendation).where(Recommendation.event_id == other_event.id)
+        )
+        assert other_recommendation is not None
+
+        response = await client.post(
+            f"/api/v1/events/{target_event.id}/decision",
+            json={
+                "decision": "accept",
+                "recommendation_id": other_recommendation.id,
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert "belongs to event" in response.json()["detail"]["message"]
+        await db_session.refresh(target_event)
+        assert target_event.status == "awaiting_review"
 
 
 class TestDecisionSpecificPermissions:
@@ -592,7 +707,9 @@ class TestDecisionSpecificPermissions:
             ),
         )
         assert resp.status_code == 403
-        assert "events:escalate" in resp.json()["detail"]["message"]
+        # The route-level least-privilege boundary rejects this role before
+        # the service evaluates the decision-specific escalation permission.
+        assert "events:decide" in resp.json()["detail"]["message"]
 
     async def test_409_event_in_assessing_status(
         self, client: AsyncClient, db_session: AsyncSession

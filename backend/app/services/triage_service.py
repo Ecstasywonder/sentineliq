@@ -6,7 +6,7 @@ Invocation priority (three paths, highest to lowest):
   PATH B — watsonx Orchestrate SaaS (primary, future)
     Condition: settings.orchestrate_active == True
                (ORCHESTRATE_URL + API key both set)
-    Mechanism: POST <tenant>/v1/agents/<agent_id>/run
+    Mechanism: IAM bearer token → POST /v2/orchestrate/<agent_id>/chat/completions
     Benefits:  agent versioning, governance, collaborator chains,
                Orchestrate UI traces, human-approval steps, evaluation
 
@@ -42,15 +42,13 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.models.agent_run import AgentRun, ToolCall
+from app.services.orchestrate_client import OrchestrateClient, validate_watsonx_base_url
 
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Endpoint / model constants
 # ---------------------------------------------------------------------------
-
-# Path B — watsonx Orchestrate SaaS
-_ORCHESTRATE_AGENT_RUN_PATH = "/v1/agents/{agent_id}/run"
 
 # Path A — watsonx.ai Chat API (verified 2026-11-05)
 _WATSONX_CHAT_PATH = "/ml/v1/text/chat"
@@ -63,53 +61,63 @@ _IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
 # Allowlists — must stay in sync with agents/triage/agent.yaml
 # ---------------------------------------------------------------------------
 
-_ALL_CATEGORIES = frozenset({
-    "after_hours_presence",
-    "restricted_area_access",
-    "delivery_event",
-    "authorized_access",
-    "alarm_event",
-    "vehicle_event",
-    "unclassified",
-})
-_ALL_SIGNALS = frozenset({
-    "after_hours",
-    "restricted_zone",
-    "forced_entry",
-    "no_camera_coverage",
-    "repeated_event",
-    "low_detector_confidence",
-    "missing_event_metadata",
-})
-_ALL_CONTEXT = frozenset({
-    "access_control",
-    "schedule",
-    "location_policy",
-    "incident_history",
-    "work_orders",
-    "delivery_context",
-    "visitor_context",
-    "integration_health",
-})
+_ALL_CATEGORIES = frozenset(
+    {
+        "after_hours_presence",
+        "restricted_area_access",
+        "delivery_event",
+        "authorized_access",
+        "alarm_event",
+        "vehicle_event",
+        "unclassified",
+    }
+)
+_ALL_SIGNALS = frozenset(
+    {
+        "after_hours",
+        "restricted_zone",
+        "forced_entry",
+        "no_camera_coverage",
+        "repeated_event",
+        "low_detector_confidence",
+        "missing_event_metadata",
+    }
+)
+_ALL_CONTEXT = frozenset(
+    {
+        "access_control",
+        "schedule",
+        "location_policy",
+        "incident_history",
+        "work_orders",
+        "delivery_context",
+        "visitor_context",
+        "integration_health",
+    }
+)
 
 # Minimum context always included regardless of agent output
-_BASELINE_CONTEXT = frozenset({
-    "access_control",
-    "schedule",
-    "location_policy",
-    "incident_history",
-})
+_BASELINE_CONTEXT = frozenset(
+    {
+        "access_control",
+        "schedule",
+        "location_policy",
+        "incident_history",
+    }
+)
 
-_ALL_EVENT_TYPES = frozenset({
-    "person_detected",
-    "door_forced",
-    "motion_detected",
-    "badge_event",
-    "delivery_detected",
-    "vehicle_detected",
-    "alarm_triggered",
-    "other",
-})
+_ALL_EVENT_TYPES = frozenset(
+    {
+        "person_detected",
+        "door_forced",
+        "motion_detected",
+        "badge_event",
+        "delivery_detected",
+        "vehicle_detected",
+        "alarm_triggered",
+        "other",
+    }
+)
 
 # System prompt shared by both Path B and Path A — mirrors agents/triage/agent.yaml
 _TRIAGE_SYSTEM_PROMPT = (
@@ -200,25 +208,36 @@ class TriageService:
                 result = self._parse_and_validate(event_id, raw, source="orchestrate")
                 result.agent_run_id = run_id
                 await self._persist_agent_run(
-                    run_id=run_id, event_id=event_id, started_at=started_at,
-                    status="success", duration_ms=duration_ms,
+                    run_id=run_id,
+                    event_id=event_id,
+                    started_at=started_at,
+                    status="success",
+                    duration_ms=duration_ms,
                     agent_name="sentinel_triage_agent",
                     agent_version=settings.orchestrate_triage_agent_id,
-                    path="orchestrate", tool_calls=[*attempt_records, *tool_calls],
+                    path="orchestrate",
+                    tool_calls=[*attempt_records, *tool_calls],
                 )
-                logger.info("triage.path_b.success", event_id=event_id,
-                            category=result.category, duration_ms=round(duration_ms, 1))
+                logger.info(
+                    "triage.path_b.success",
+                    event_id=event_id,
+                    category=result.category,
+                    duration_ms=round(duration_ms, 1),
+                )
                 return result
             except Exception as exc:
-                attempt_records.append({
-                    "tool_name": "orchestrate_agent_run",
-                    "status": "failed",
-                    "duration_ms": (time.monotonic() - attempt_started) * 1000,
-                    "error_message": str(exc)[:512],
-                })
+                attempt_records.append(
+                    {
+                        "tool_name": "orchestrate_chat_completion",
+                        "status": "failed",
+                        "duration_ms": (time.monotonic() - attempt_started) * 1000,
+                        "error_message": str(exc)[:512],
+                    }
+                )
                 attempt_errors.append(f"orchestrate: {str(exc)[:256]}")
-                logger.warning("triage.path_b.failed", event_id=event_id,
-                               error=str(exc), fallthrough="path_a")
+                logger.warning(
+                    "triage.path_b.failed", event_id=event_id, error=str(exc), fallthrough="path_a"
+                )
 
         # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
         if settings.watsonx_active:
@@ -231,25 +250,36 @@ class TriageService:
                 result = self._parse_and_validate(event_id, raw, source="watsonx_ai")
                 result.agent_run_id = run_id
                 await self._persist_agent_run(
-                    run_id=run_id, event_id=event_id, started_at=started_at,
-                    status="success", duration_ms=duration_ms,
+                    run_id=run_id,
+                    event_id=event_id,
+                    started_at=started_at,
+                    status="success",
+                    duration_ms=duration_ms,
                     agent_name="sentinel_triage_agent",
                     agent_version=settings.watsonx_model_id,
-                    path="watsonx_ai", tool_calls=[*attempt_records, *tool_calls],
+                    path="watsonx_ai",
+                    tool_calls=[*attempt_records, *tool_calls],
                 )
-                logger.info("triage.path_a.success", event_id=event_id,
-                            category=result.category, duration_ms=round(duration_ms, 1))
+                logger.info(
+                    "triage.path_a.success",
+                    event_id=event_id,
+                    category=result.category,
+                    duration_ms=round(duration_ms, 1),
+                )
                 return result
             except Exception as exc:
-                attempt_records.append({
-                    "tool_name": "watsonx_chat",
-                    "status": "failed",
-                    "duration_ms": (time.monotonic() - attempt_started) * 1000,
-                    "error_message": str(exc)[:512],
-                })
+                attempt_records.append(
+                    {
+                        "tool_name": "watsonx_chat",
+                        "status": "failed",
+                        "duration_ms": (time.monotonic() - attempt_started) * 1000,
+                        "error_message": str(exc)[:512],
+                    }
+                )
                 attempt_errors.append(f"watsonx_ai: {str(exc)[:256]}")
-                logger.warning("triage.path_a.failed", event_id=event_id,
-                               error=str(exc), fallthrough="path_0")
+                logger.warning(
+                    "triage.path_a.failed", event_id=event_id, error=str(exc), fallthrough="path_0"
+                )
                 # fall through to Path 0
 
         # ---- PATH 0: Deterministic (always available) ------------------------
@@ -260,15 +290,20 @@ class TriageService:
         result = self._deterministic_triage(event_id, safe_event_metadata)
         result.agent_run_id = run_id
         await self._persist_agent_run(
-            run_id=run_id, event_id=event_id, started_at=started_at,
-            status=path0_status, duration_ms=duration_ms,
+            run_id=run_id,
+            event_id=event_id,
+            started_at=started_at,
+            status=path0_status,
+            duration_ms=duration_ms,
             agent_name="sentinel_triage_agent",
             agent_version="deterministic_v1",
-            path="deterministic", tool_calls=attempt_records,
+            path="deterministic",
+            tool_calls=attempt_records,
             error_message=" | ".join(attempt_errors)[:512] or None,
         )
-        logger.info("triage.path_0.used", event_id=event_id,
-                    category=result.category, reason=path0_status)
+        logger.info(
+            "triage.path_0.used", event_id=event_id, category=result.category, reason=path0_status
+        )
         return result
 
     # ------------------------------------------------------------------
@@ -282,10 +317,9 @@ class TriageService:
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
         """
-        Call the watsonx Orchestrate agent run API.
+        Call the documented watsonx Orchestrate direct-agent chat API.
 
-        Endpoint: POST <ORCHESTRATE_URL>/v1/agents/<agent_id>/run
-        Auth:     ZenApiKey <API_KEY>   (Orchestrate uses its own auth scheme)
+        IBM Cloud SaaS authentication uses a short-lived IAM bearer token.
 
         The Orchestrate agent runtime:
           - Manages agent versioning and governance
@@ -298,44 +332,17 @@ class TriageService:
         Raises on any HTTP error or unexpected response shape.
         """
         settings = self._settings
-        base_url = settings.orchestrate_url.rstrip("/")
-        agent_id = settings.orchestrate_triage_agent_id
-        url = f"{base_url}{_ORCHESTRATE_AGENT_RUN_PATH.format(agent_id=agent_id)}"
-
-        headers = {
-            "Authorization": f"ZenApiKey {settings.effective_watsonx_api_key}",
-            "Content-Type": "application/json",
-        }
-        payload: dict[str, Any] = {
-            "input": json.dumps(event_metadata, default=str),
-        }
-
-        tool_call_records: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            t0 = time.monotonic()
-            response = await client.post(url, headers=headers, json=payload)
-            call_ms = (time.monotonic() - t0) * 1000
-            response.raise_for_status()
-
-        data = response.json()
-        tool_call_records.append({
-            "tool_name": "orchestrate_agent_run",
-            "status": "success",
-            "duration_ms": call_ms,
-            "sequence": 0,
-        })
-
-        # Orchestrate agent run response: { "output": "<text>" } or { "content": "<text>" }
-        content = data.get("output") or data.get("content") or ""
-        if not content:
-            # Try OpenAI-style choices if Orchestrate proxies chat completions
-            choices = data.get("choices") or []
-            if choices:
-                content = (choices[0].get("message") or {}).get("content", "")
-        if not content:
-            raise ValueError(f"Orchestrate response had no usable content. keys={list(data)}")
-
-        return content, tool_call_records
+        client = OrchestrateClient(
+            base_url=settings.orchestrate_url,
+            api_key=settings.effective_orchestrate_api_key,
+            timeout=timeout,
+            api_version=settings.orchestrate_api_version,
+        )
+        return await client.chat(
+            agent_id=settings.orchestrate_triage_agent_id,
+            system_prompt=_TRIAGE_SYSTEM_PROMPT,
+            input_payload=event_metadata,
+        )
 
     # ------------------------------------------------------------------
     # PATH A — watsonx.ai Chat API (verified working)
@@ -361,11 +368,9 @@ class TriageService:
         Raises on HTTP errors, IAM failure, or empty response.
         """
         settings = self._settings
-        base_url = settings.effective_watsonx_base_url.rstrip("/")
+        base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
 
-        iam_token = await self._get_iam_token(
-            settings.effective_watsonx_api_key, timeout
-        )
+        iam_token = await self._get_iam_token(settings.effective_watsonx_api_key, timeout)
         headers = {
             "Authorization": f"Bearer {iam_token}",
             "Content-Type": "application/json",
@@ -393,12 +398,14 @@ class TriageService:
             response.raise_for_status()
 
         data = response.json()
-        tool_call_records.append({
-            "tool_name": "watsonx_chat",
-            "status": "success",
-            "duration_ms": call_ms,
-            "sequence": 0,
-        })
+        tool_call_records.append(
+            {
+                "tool_name": "watsonx_chat",
+                "status": "success",
+                "duration_ms": call_ms,
+                "sequence": 0,
+            }
+        )
 
         choices = data.get("choices") or []
         if not choices:
@@ -462,9 +469,7 @@ class TriageService:
         return {
             "event_id": event_id,
             "event_type": event_type,
-            "event_timestamp": self._safe_text(
-                event_metadata.get("event_timestamp"), limit=40
-            ),
+            "event_timestamp": self._safe_text(event_metadata.get("event_timestamp"), limit=40),
             "location_id": self._safe_text(event_metadata.get("location_id"), limit=128),
             "facility_id": self._safe_text(event_metadata.get("facility_id"), limit=128),
             "camera_id": self._safe_text(event_metadata.get("camera_id"), limit=128),
@@ -494,9 +499,7 @@ class TriageService:
         text = raw_output.strip()
         # Strip markdown fences if model wrapped output
         if text.startswith("```"):
-            text = "\n".join(
-                ln for ln in text.splitlines() if not ln.startswith("```")
-            ).strip()
+            text = "\n".join(ln for ln in text.splitlines() if not ln.startswith("```")).strip()
 
         try:
             data = json.loads(text)
@@ -523,25 +526,21 @@ class TriageService:
         raw_signals = data.get("urgency_signals")
         if not isinstance(raw_signals, list):
             raw_signals = []
-        data["urgency_signals"] = list(dict.fromkeys(
-            s for s in raw_signals if isinstance(s, str) and s in _ALL_SIGNALS
-        ))
+        data["urgency_signals"] = list(
+            dict.fromkeys(s for s in raw_signals if isinstance(s, str) and s in _ALL_SIGNALS)
+        )
 
         # Allowlist filter + baseline guarantee — required_context
         raw_context = data.get("required_context")
         if not isinstance(raw_context, list):
             raw_context = []
-        filtered = {
-            c for c in raw_context if isinstance(c, str) and c in _ALL_CONTEXT
-        }
+        filtered = {c for c in raw_context if isinstance(c, str) and c in _ALL_CONTEXT}
         data["required_context"] = sorted(filtered | _BASELINE_CONTEXT)
 
         # Do not display model-authored free text. The rationale is rebuilt from
         # allowlisted structured output so injected instructions cannot reach UI/audit.
         signals = ", ".join(data["urgency_signals"]) or "no allowlisted urgency signals"
-        data["triage_rationale"] = (
-            f"Classified as {data['category']} using {signals}."
-        )[:512]
+        data["triage_rationale"] = (f"Classified as {data['category']} using {signals}.")[:512]
         data["source"] = source
 
         return TriageResult(**data)
@@ -669,30 +668,34 @@ class TriageService:
             # AgentRun/ToolCall constraint or storage failure so it cannot mark
             # the caller's assessment transaction as failed.
             async with self._session.begin_nested():
-                self._session.add(AgentRun(
-                    id=run_id,
-                    event_id=event_id,
-                    agent_name=agent_name,
-                    agent_version=agent_version,
-                    orchestrate_run_id=f"path:{path}",
-                    status=status,
-                    started_at=started_at,
-                    completed_at=completed_at,
-                    duration_ms=round(duration_ms, 2),
-                    error_message=error_message,
-                ))
-                for seq, tc in enumerate(tool_calls):
-                    self._session.add(ToolCall(
-                        id=str(uuid.uuid4()),
-                        agent_run_id=run_id,
-                        tool_name=tc.get("tool_name", "unknown"),
-                        status=tc.get("status", "success"),
+                self._session.add(
+                    AgentRun(
+                        id=run_id,
+                        event_id=event_id,
+                        agent_name=agent_name,
+                        agent_version=agent_version,
+                        orchestrate_run_id=f"path:{path}",
+                        status=status,
                         started_at=started_at,
                         completed_at=completed_at,
-                        duration_ms=round(tc.get("duration_ms", 0.0), 2),
-                        sequence=seq,
-                        error_message=tc.get("error_message"),
-                    ))
+                        duration_ms=round(duration_ms, 2),
+                        error_message=error_message,
+                    )
+                )
+                for seq, tc in enumerate(tool_calls):
+                    self._session.add(
+                        ToolCall(
+                            id=str(uuid.uuid4()),
+                            agent_run_id=run_id,
+                            tool_name=tc.get("tool_name", "unknown"),
+                            status=tc.get("status", "success"),
+                            started_at=started_at,
+                            completed_at=completed_at,
+                            duration_ms=round(tc.get("duration_ms", 0.0), 2),
+                            sequence=seq,
+                            error_message=tc.get("error_message"),
+                        )
+                    )
                 await self._session.flush()
         except Exception as exc:
             logger.error(

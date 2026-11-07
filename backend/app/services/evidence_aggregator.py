@@ -18,9 +18,9 @@ from app.integrations.access_control import MockAccessControlAdapter
 from app.integrations.delivery import MockDeliveryAdapter
 from app.integrations.schedule import MockScheduleAdapter
 from app.integrations.work_order import MockWorkOrderAdapter
+from app.models.event import SecurityEvent
 from app.models.incident import IncidentHistory
 from app.models.integration import IntegrationHealth
-from app.models.event import SecurityEvent
 from app.models.security_rule import SecurityRule
 from app.schemas.knowledge import KnowledgeSearchResponse
 from app.schemas.tools import (
@@ -190,9 +190,7 @@ class EvidenceAggregator:
         facility_id: str | None,
         limit: int,
     ) -> ScheduleResponse:
-        raw = await self._schedule.get_schedule(
-            location_id, facility_id=facility_id, limit=limit
-        )
+        raw = await self._schedule.get_schedule(location_id, facility_id=facility_id, limit=limit)
         records = [ScheduleRecord(**r) for r in raw]
         return ScheduleResponse(
             meta=ToolMeta(
@@ -230,9 +228,7 @@ class EvidenceAggregator:
         facility_id: str | None,
         limit: int,
     ) -> DeliveryResponse:
-        raw = await self._delivery.get_deliveries(
-            location_id, facility_id=facility_id, limit=limit
-        )
+        raw = await self._delivery.get_deliveries(location_id, facility_id=facility_id, limit=limit)
         records = [DeliveryRecord(**r) for r in raw]
         return DeliveryResponse(
             meta=ToolMeta(
@@ -252,15 +248,11 @@ class EvidenceAggregator:
         stmt = (
             select(SecurityRule)
             .where(SecurityRule.is_active.is_(True))
-            .where(
-                (SecurityRule.location_id == location_id)
-                | (SecurityRule.location_id.is_(None))
-            )
+            .where((SecurityRule.location_id == location_id) | (SecurityRule.location_id.is_(None)))
         )
         if facility_id:
             stmt = stmt.where(
-                (SecurityRule.facility_id == facility_id)
-                | (SecurityRule.facility_id.is_(None))
+                (SecurityRule.facility_id == facility_id) | (SecurityRule.facility_id.is_(None))
             )
         result = await self._session.execute(stmt)
         rows = result.scalars().all()
@@ -404,7 +396,7 @@ class EvidenceAggregator:
         """Await *coro*; on any exception store in *errors* and return None."""
         try:
             return await coro
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("evidence_fetch_failed", source=key, error=str(exc))
             errors[key] = str(exc)
             return None

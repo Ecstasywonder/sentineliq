@@ -45,7 +45,9 @@ async def generate_scenarios(
             duplicates=0,
             events=[
                 SimulatorEventResponse(
-                    scenario_id=scenario["id"], title=scenario["title"], event=event_payload(scenario)
+                    scenario_id=scenario["id"],
+                    title=scenario["title"],
+                    event=event_payload(scenario),
                 )
                 for scenario in scenarios
             ],

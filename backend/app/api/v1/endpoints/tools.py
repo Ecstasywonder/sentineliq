@@ -28,10 +28,11 @@ from app.integrations.access_control import MockAccessControlAdapter
 from app.integrations.delivery import MockDeliveryAdapter
 from app.integrations.schedule import MockScheduleAdapter
 from app.integrations.work_order import MockWorkOrderAdapter
-from app.models.incident import IncidentHistory
-from app.models.integration import IntegrationHealth
 from app.models.assessment import RiskAssessment
 from app.models.event import SecurityEvent
+from app.models.incident import IncidentHistory
+from app.models.integration import IntegrationHealth
+from app.models.recommendation import Recommendation
 from app.models.security_rule import SecurityRule
 from app.schemas.explanation import AssessmentBundleResponse
 from app.schemas.knowledge import KnowledgeSearchResponse
@@ -81,6 +82,17 @@ def _json_list(raw: str | None) -> list[dict]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def _json_string_list(raw: str | None) -> list[str]:
+    """Return only string values from a persisted JSON array."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 # ---------------------------------------------------------------------------
 # 1. Access Events
 # ---------------------------------------------------------------------------
@@ -104,6 +116,10 @@ async def get_assessment_bundle(
     assessment = assessment_result.scalar_one_or_none()
     if event is None or assessment is None:
         raise HTTPException(status_code=404, detail="Assessment bundle not found.")
+    recommendation_result = await session.execute(
+        select(Recommendation).where(Recommendation.event_id == event_id)
+    )
+    recommendation = recommendation_result.scalar_one_or_none()
 
     return AssessmentBundleResponse(
         event_id=event_id,
@@ -117,6 +133,25 @@ async def get_assessment_bundle(
         triage=_json_object(assessment.triage_result_json),
         context=_json_object(assessment.context_result_json),
         explanation=_json_object(assessment.explanation_result_json),
+        recommendation_id=recommendation.id if recommendation else None,
+        recommendation=(
+            {
+                "id": recommendation.id,
+                "summary": recommendation.summary,
+                "recommended_action": recommendation.recommended_action,
+                "why": _json_list(recommendation.why_json),
+                "missing_evidence": _json_string_list(recommendation.missing_evidence_json),
+                "limitations": _json_string_list(recommendation.limitations_json),
+                "requires_human_review": recommendation.requires_human_review,
+                "risk_level": recommendation.risk_level,
+                "risk_score": recommendation.risk_score,
+                "confidence_score": recommendation.confidence_score,
+                "agent_run_id": recommendation.agent_run_id,
+                "generated_at": recommendation.generated_at,
+            }
+            if recommendation is not None
+            else {}
+        ),
         evidence_errors={
             str(key): str(value)
             for key, value in _json_object(assessment.evidence_errors_json).items()
@@ -271,15 +306,11 @@ async def get_location_policy(
     stmt = (
         select(SecurityRule)
         .where(SecurityRule.is_active.is_(True))
-        .where(
-            (SecurityRule.location_id == location_id)
-            | (SecurityRule.location_id.is_(None))
-        )
+        .where((SecurityRule.location_id == location_id) | (SecurityRule.location_id.is_(None)))
     )
     if facility_id:
         stmt = stmt.where(
-            (SecurityRule.facility_id == facility_id)
-            | (SecurityRule.facility_id.is_(None))
+            (SecurityRule.facility_id == facility_id) | (SecurityRule.facility_id.is_(None))
         )
     result = await session.execute(stmt)
     rows = result.scalars().all()

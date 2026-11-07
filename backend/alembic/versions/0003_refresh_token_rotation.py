@@ -1,7 +1,7 @@
 """Add durable one-time refresh-token rotation state.
 
 Revision ID: 0003_refresh_token_rotation
-Revises: 0002_assessment_reconstruction_bundle
+Revises: 0002_assessment_bundle
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0003_refresh_token_rotation"
-down_revision: str | None = "0002_assessment_reconstruction_bundle"
+down_revision: str | None = "0002_assessment_bundle"
 branch_labels: str | tuple[str, ...] | None = None
 depends_on: str | tuple[str, ...] | None = None
 

@@ -12,7 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 ContextSourceName = Literal[
     "access_control",
     "schedule",
@@ -68,9 +67,7 @@ class ContextAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     event_id: str = Field(min_length=1, max_length=128)
-    source_statuses: dict[ContextSourceName, ContextAgentSourceStatus] = Field(
-        max_length=8
-    )
+    source_statuses: dict[ContextSourceName, ContextAgentSourceStatus] = Field(max_length=8)
     conflicts: list[ContextAgentConflict] = Field(max_length=20)
     missing_sources: list[ContextSourceName] = Field(max_length=8)
     context_summary: str = Field(max_length=1024)

@@ -31,6 +31,7 @@ from app.services.risk_engine import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _id() -> str:
     return str(uuid.uuid4())
 
@@ -46,14 +47,54 @@ _THRESHOLDS = json.dumps(
 
 # Default v1.0 factor definitions — mirrors seed data
 _FACTORS = [
-    {"factor_id": "no_matching_badge",   "label": "No matching authorised badge",     "weight": 25.0,  "direction": "increases_risk"},
-    {"factor_id": "outside_schedule",    "label": "Activity outside permitted schedule", "weight": 20.0, "direction": "increases_risk"},
-    {"factor_id": "restricted_area",     "label": "Restricted location at event time", "weight": 25.0, "direction": "increases_risk"},
-    {"factor_id": "no_work_order",       "label": "No approved work order",           "weight": 15.0,  "direction": "increases_risk"},
-    {"factor_id": "recent_incidents",    "label": "Relevant recent incidents",        "weight": 10.0,  "direction": "increases_risk"},
-    {"factor_id": "forced_door_alarm",   "label": "Forced door or security alarm",    "weight": 40.0,  "direction": "increases_risk"},
-    {"factor_id": "approved_maintenance","label": "Known approved maintenance",       "weight": -30.0, "direction": "decreases_risk"},
-    {"factor_id": "valid_access_schedule","label": "Valid access and matching schedule","weight": -35.0,"direction": "decreases_risk"},
+    {
+        "factor_id": "no_matching_badge",
+        "label": "No matching authorised badge",
+        "weight": 25.0,
+        "direction": "increases_risk",
+    },
+    {
+        "factor_id": "outside_schedule",
+        "label": "Activity outside permitted schedule",
+        "weight": 20.0,
+        "direction": "increases_risk",
+    },
+    {
+        "factor_id": "restricted_area",
+        "label": "Restricted location at event time",
+        "weight": 25.0,
+        "direction": "increases_risk",
+    },
+    {
+        "factor_id": "no_work_order",
+        "label": "No approved work order",
+        "weight": 15.0,
+        "direction": "increases_risk",
+    },
+    {
+        "factor_id": "recent_incidents",
+        "label": "Relevant recent incidents",
+        "weight": 10.0,
+        "direction": "increases_risk",
+    },
+    {
+        "factor_id": "forced_door_alarm",
+        "label": "Forced door or security alarm",
+        "weight": 40.0,
+        "direction": "increases_risk",
+    },
+    {
+        "factor_id": "approved_maintenance",
+        "label": "Known approved maintenance",
+        "weight": -30.0,
+        "direction": "decreases_risk",
+    },
+    {
+        "factor_id": "valid_access_schedule",
+        "label": "Valid access and matching schedule",
+        "weight": -35.0,
+        "direction": "decreases_risk",
+    },
 ]
 
 
@@ -85,6 +126,7 @@ async def _seed_policy(session: AsyncSession, version: str = "1.0") -> RiskPolic
 # ---------------------------------------------------------------------------
 # _classify_risk unit tests (pure, no DB)
 # ---------------------------------------------------------------------------
+
 
 class TestClassifyRisk:
     def _thresholds(self) -> dict:
@@ -118,19 +160,20 @@ class TestClassifyRisk:
         # Fully-specified threshold dict with all four levels
         custom = {
             "critical": {"min": 75, "max": None},
-            "high":     {"min": 50, "max": 74},
-            "medium":   {"min": 25, "max": 49},
-            "low":      {"min": 0,  "max": 24},
+            "high": {"min": 50, "max": 74},
+            "medium": {"min": 25, "max": 49},
+            "low": {"min": 0, "max": 24},
         }
         assert _classify_risk(75.0, custom) == "critical"
         assert _classify_risk(50.0, custom) == "high"
         assert _classify_risk(25.0, custom) == "medium"
-        assert _classify_risk(0.0,  custom) == "low"
+        assert _classify_risk(0.0, custom) == "low"
 
 
 # ---------------------------------------------------------------------------
 # RiskEngine integration tests (async, uses db_session fixture from conftest)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_zero_signals_scores_zero(db_session: AsyncSession) -> None:
@@ -159,7 +202,7 @@ async def test_scenario_a_authorised_activity(db_session: AsyncSession) -> None:
 
     signals = [
         FactorSignal("valid_access_schedule", triggered=True, source="access_control"),
-        FactorSignal("approved_maintenance",  triggered=False),
+        FactorSignal("approved_maintenance", triggered=False),
     ]
     result = await engine.assess(signals, policy_version="1.0-a")
 
@@ -184,8 +227,8 @@ async def test_scenario_b_unverified_after_hours(db_session: AsyncSession) -> No
 
     signals = [
         FactorSignal("no_matching_badge", triggered=True, source="access_control"),
-        FactorSignal("outside_schedule",  triggered=True, source="schedule"),
-        FactorSignal("restricted_area",   triggered=True, source="policy"),
+        FactorSignal("outside_schedule", triggered=True, source="schedule"),
+        FactorSignal("restricted_area", triggered=True, source="policy"),
     ]
     result = await engine.assess(signals, policy_version="1.0-b")
 
@@ -224,11 +267,11 @@ async def test_scenario_d_critical_event(db_session: AsyncSession) -> None:
     engine = RiskEngine(db_session)
 
     signals = [
-        FactorSignal("no_matching_badge",  triggered=True),
-        FactorSignal("outside_schedule",   triggered=True),
-        FactorSignal("restricted_area",    triggered=True),
-        FactorSignal("forced_door_alarm",  triggered=True),
-        FactorSignal("recent_incidents",   triggered=True),
+        FactorSignal("no_matching_badge", triggered=True),
+        FactorSignal("outside_schedule", triggered=True),
+        FactorSignal("restricted_area", triggered=True),
+        FactorSignal("forced_door_alarm", triggered=True),
+        FactorSignal("recent_incidents", triggered=True),
     ]
     result = await engine.assess(signals, policy_version="1.0-d")
 
@@ -249,7 +292,7 @@ async def test_scenario_e_ai_unavailable_deterministic_score(db_session: AsyncSe
 
     signals = [
         FactorSignal("no_matching_badge", triggered=True),
-        FactorSignal("outside_schedule",  triggered=True),
+        FactorSignal("outside_schedule", triggered=True),
     ]
     result = await engine.assess(signals, policy_version="1.0-e")
 
@@ -361,24 +404,32 @@ async def test_inactive_factor_excluded(db_session: AsyncSession) -> None:
     # Active factor
     db_session.add(
         RiskPolicyFactor(
-            id=_id(), policy_id=policy.id,
-            factor_id="active_factor", label="Active",
-            weight=30.0, direction="increases_risk", is_active=True,
+            id=_id(),
+            policy_id=policy.id,
+            factor_id="active_factor",
+            label="Active",
+            weight=30.0,
+            direction="increases_risk",
+            is_active=True,
         )
     )
     # Inactive factor — should be excluded
     db_session.add(
         RiskPolicyFactor(
-            id=_id(), policy_id=policy.id,
-            factor_id="inactive_factor", label="Inactive",
-            weight=50.0, direction="increases_risk", is_active=False,
+            id=_id(),
+            policy_id=policy.id,
+            factor_id="inactive_factor",
+            label="Inactive",
+            weight=50.0,
+            direction="increases_risk",
+            is_active=False,
         )
     )
     await db_session.flush()
 
     engine = RiskEngine(db_session)
     signals = [
-        FactorSignal("active_factor",   triggered=True),
+        FactorSignal("active_factor", triggered=True),
         FactorSignal("inactive_factor", triggered=True),
     ]
     result = await engine.assess(signals, policy_version="1.0-inactive")

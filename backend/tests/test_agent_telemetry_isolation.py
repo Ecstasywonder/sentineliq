@@ -88,9 +88,7 @@ async def _assert_savepoint_isolation(
     )
 
     count = await db_session.scalar(
-        select(func.count())
-        .select_from(AgentRun)
-        .where(AgentRun.event_id == event_id)
+        select(func.count()).select_from(AgentRun).where(AgentRun.event_id == event_id)
     )
     assert count == 2
 

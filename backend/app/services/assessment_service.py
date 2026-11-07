@@ -31,9 +31,15 @@ from app.config import get_settings
 from app.models.assessment import ConfidenceAssessment, RiskAssessment
 from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
-from app.schemas.assessment import AssessmentResponse, ConfidenceReductionDetail, RiskFactorDetail
+from app.models.recommendation import Recommendation
+from app.schemas.assessment import (
+    AssessmentResponse,
+    ConfidenceReductionDetail,
+    RecommendationDetail,
+    RiskFactorDetail,
+)
 from app.schemas.context import ContextResultDetail
-from app.schemas.explanation import ExplanationResultDetail
+from app.schemas.explanation import ExplanationResultDetail, WhyReason
 from app.schemas.triage import TriageResultDetail
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
 from app.services.context_service import ContextService
@@ -236,7 +242,16 @@ class AssessmentService:
 
         # ---- 7. Persist assessment rows -------------------------------------
         assessed_at = datetime.now(UTC).isoformat()
-        await self._persist_assessments(
+        workflow_state = self._build_workflow_state(
+            triage_result=triage_result,
+            context_result=context_result,
+            risk_result=risk_result,
+            conf_result=conf_result,
+            explanation_result=explanation_result,
+            evidence_errors=normalized_evidence_errors,
+            assessed_at=assessed_at,
+        )
+        recommendation = await self._persist_assessments(
             event_id,
             risk_result,
             conf_result,
@@ -244,6 +259,7 @@ class AssessmentService:
             context_result,
             explanation_result,
             normalized_evidence_errors,
+            workflow_state,
             assessed_at,
         )
 
@@ -257,31 +273,32 @@ class AssessmentService:
         self._session.add(event)
 
         # Write immutable audit trail entry for the assessment
-        self._session.add(AuditEvent(
-            id=str(uuid.uuid4()),
-            event_id=event_id,
-            action="risk_assessed",
-            actor="system:assessment_service",
-            occurred_at=assessed_at,
-            details_json=json.dumps({
-                "risk_score": risk_result.risk_score,
-                "risk_level": risk_result.risk_level,
-                "confidence_score": conf_result.confidence_score,
-                "confidence_level": conf_result.confidence_level,
-                "sources_available": conf_result.sources_available,
-                "evidence_errors": normalized_evidence_errors,
-                "triage_agent_run_id": triage_result.agent_run_id,
-                "context_agent_run_id": context_result.agent_run_id,
-                "explanation_agent_run_id": explanation_result.agent_run_id,
-                "triage": triage_result.model_dump(mode="json"),
-                "context": context_result.model_dump(mode="json"),
-                "explanation": explanation_result.model_dump(mode="json"),
-                "workflow_state": {
-                    "before": "assessing",
-                    "after": "awaiting_review",
-                },
-            }),
-        ))
+        self._session.add(
+            AuditEvent(
+                id=str(uuid.uuid4()),
+                event_id=event_id,
+                action="risk_assessed",
+                actor="system:assessment_service",
+                occurred_at=assessed_at,
+                details_json=json.dumps(
+                    {
+                        "risk_score": risk_result.risk_score,
+                        "risk_level": risk_result.risk_level,
+                        "confidence_score": conf_result.confidence_score,
+                        "confidence_level": conf_result.confidence_level,
+                        "sources_available": conf_result.sources_available,
+                        "evidence_errors": normalized_evidence_errors,
+                        "triage_agent_run_id": triage_result.agent_run_id,
+                        "context_agent_run_id": context_result.agent_run_id,
+                        "explanation_agent_run_id": explanation_result.agent_run_id,
+                        "triage": triage_result.model_dump(mode="json"),
+                        "context": context_result.model_dump(mode="json"),
+                        "explanation": explanation_result.model_dump(mode="json"),
+                        "workflow_state": workflow_state,
+                    }
+                ),
+            )
+        )
 
         await self._session.flush()
 
@@ -329,6 +346,7 @@ class AssessmentService:
             source=explanation_result.source,
             agent_run_id=explanation_result.agent_run_id,
         )
+        recommendation_detail = self._recommendation_detail(recommendation)
 
         return AssessmentResponse(
             event_id=event_id,
@@ -336,6 +354,8 @@ class AssessmentService:
             triage=triage_detail,
             context=context_detail,
             explanation=explanation_detail,
+            recommendation_id=recommendation.id,
+            recommendation=recommendation_detail,
             risk_score=risk_result.risk_score,
             risk_level=risk_result.risk_level,
             risk_policy_version=risk_result.policy_version,
@@ -415,16 +435,13 @@ class AssessmentService:
             return event, persisted
 
         if event.status == "assessing":
-            raise ValueError(
-                f"Event '{event_id}' is already being assessed by another request."
-            )
+            raise ValueError(f"Event '{event_id}' is already being assessed by another request.")
 
         # Preserve the lifecycle service's precise error for terminal or
         # otherwise invalid states.
         validate_transition(event.status, "assessing")
         raise ValueError(
-            f"Event '{event_id}' could not be claimed for assessment from "
-            f"status '{event.status}'."
+            f"Event '{event_id}' could not be claimed for assessment from status '{event.status}'."
         )
 
     async def _response_from_persisted(
@@ -440,9 +457,7 @@ class AssessmentService:
             return None
 
         conf_result = await self._session.execute(
-            select(ConfidenceAssessment).where(
-                ConfidenceAssessment.event_id == event.id
-            )
+            select(ConfidenceAssessment).where(ConfidenceAssessment.event_id == event.id)
         )
         conf_row = conf_result.scalar_one_or_none()
 
@@ -494,14 +509,16 @@ class AssessmentService:
             risk_row.explanation_result_json,
             ExplanationResultDetail,
         )
+        recommendation_result = await self._session.execute(
+            select(Recommendation).where(Recommendation.event_id == event.id)
+        )
+        recommendation = recommendation_result.scalar_one_or_none()
         evidence_errors = _json_value(risk_row.evidence_errors_json, {})
         if not isinstance(evidence_errors, dict):
             evidence_errors = {}
 
         confidence_score = (
-            conf_row.confidence_score
-            if conf_row is not None
-            else risk_row.confidence_score or 0.0
+            conf_row.confidence_score if conf_row is not None else risk_row.confidence_score or 0.0
         )
         confidence_level = (
             conf_row.confidence_level
@@ -515,6 +532,10 @@ class AssessmentService:
             triage=triage,
             context=context,
             explanation=explanation,
+            recommendation_id=recommendation.id if recommendation else None,
+            recommendation=(
+                self._recommendation_detail(recommendation) if recommendation is not None else None
+            ),
             risk_score=risk_row.risk_score,
             risk_level=risk_row.risk_level,
             risk_policy_version=risk_row.risk_policy_version,
@@ -568,9 +589,7 @@ class AssessmentService:
         # --- unverified_person -----------------------------------------------
         unverified = False
         if evidence.access_events and evidence.access_events.records:
-            unverified = any(
-                not rec.access_granted for rec in evidence.access_events.records
-            )
+            unverified = any(not rec.access_granted for rec in evidence.access_events.records)
         signals.append(
             FactorSignal(
                 factor_id="unverified_person",
@@ -580,10 +599,7 @@ class AssessmentService:
         )
 
         # --- no_work_order ---------------------------------------------------
-        has_work_order = bool(
-            evidence.work_orders
-            and evidence.work_orders.meta.record_count > 0
-        )
+        has_work_order = bool(evidence.work_orders and evidence.work_orders.meta.record_count > 0)
         signals.append(
             FactorSignal(
                 factor_id="no_work_order",
@@ -593,10 +609,7 @@ class AssessmentService:
         )
 
         # --- no_scheduled_entry ---------------------------------------------
-        has_schedule = bool(
-            evidence.schedule
-            and evidence.schedule.meta.record_count > 0
-        )
+        has_schedule = bool(evidence.schedule and evidence.schedule.meta.record_count > 0)
         signals.append(
             FactorSignal(
                 factor_id="no_scheduled_entry",
@@ -607,8 +620,7 @@ class AssessmentService:
 
         # --- known_incident_area --------------------------------------------
         has_incidents = bool(
-            evidence.incident_history
-            and evidence.incident_history.meta.record_count > 0
+            evidence.incident_history and evidence.incident_history.meta.record_count > 0
         )
         signals.append(
             FactorSignal(
@@ -676,6 +688,142 @@ class AssessmentService:
             for section, message in errors.items()
         }
 
+    @staticmethod
+    def _build_workflow_state(
+        *,
+        triage_result,
+        context_result,
+        risk_result,
+        conf_result,
+        explanation_result,
+        evidence_errors: dict[str, str],
+        assessed_at: str,
+    ) -> dict[str, object]:
+        """Build the persisted Gate 14 stage ledger.
+
+        The ledger records orchestration facts, not model prose. It lets an
+        operator or agent reconstruct which stages completed, which execution
+        path each agent used, and whether evidence was missing, without
+        treating an LLM response as workflow authority.
+        """
+        evidence_status = "completed_with_errors" if evidence_errors else "completed"
+        return {
+            "schema_version": 1,
+            "run_status": "completed",
+            "event_status": {
+                "before": "assessing",
+                "after": "awaiting_review",
+            },
+            "completed_at": assessed_at,
+            "human_review_required": True,
+            "stages": [
+                {
+                    "name": "event",
+                    "status": "completed",
+                },
+                {
+                    "name": "triage",
+                    "status": "completed",
+                    "source": triage_result.source,
+                    "agent_run_id": triage_result.agent_run_id,
+                },
+                {
+                    "name": "context",
+                    "status": evidence_status,
+                    "source": context_result.source,
+                    "agent_run_id": context_result.agent_run_id,
+                    "error_sources": sorted(evidence_errors),
+                },
+                {
+                    "name": "evidence_validation",
+                    "status": "completed",
+                    "has_conflicts": context_result.has_conflicts,
+                    "missing_sources": list(context_result.missing_sources),
+                },
+                {
+                    "name": "risk",
+                    "status": "completed",
+                    "source": "deterministic",
+                    "policy_version": risk_result.policy_version,
+                },
+                {
+                    "name": "confidence",
+                    "status": "completed",
+                    "source": "deterministic",
+                    "sources_available": conf_result.sources_available,
+                    "sources_required": conf_result.sources_required,
+                },
+                {
+                    "name": "explanation",
+                    "status": "completed",
+                    "source": explanation_result.source,
+                    "agent_run_id": explanation_result.agent_run_id,
+                },
+                {
+                    "name": "recommendation",
+                    "status": "completed",
+                    "human_approval_required": True,
+                },
+                {
+                    "name": "human_review",
+                    "status": "required",
+                },
+            ],
+        }
+
+    @staticmethod
+    def _recommendation_detail(recommendation: Recommendation) -> RecommendationDetail:
+        """Convert persisted recommendation JSON to the API's typed form.
+
+        The database representation deliberately stores the supporting lists as
+        JSON to keep a recommendation snapshot self-contained.  A malformed
+        legacy JSON field must not make an otherwise valid assessment unreadable.
+        """
+
+        def _json_list(raw: str | None) -> list:
+            if not raw:
+                return []
+            try:
+                value = json.loads(raw)
+            except (TypeError, ValueError):
+                return []
+            return value if isinstance(value, list) else []
+
+        why: list[WhyReason] = []
+        for reason in _json_list(recommendation.why_json):
+            if not isinstance(reason, dict):
+                continue
+            try:
+                why.append(WhyReason(**reason))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "assessment_service.invalid_persisted_recommendation_reason",
+                    recommendation_id=recommendation.id,
+                )
+
+        return RecommendationDetail(
+            id=recommendation.id,
+            summary=recommendation.summary,
+            recommended_action=recommendation.recommended_action,
+            why=why,
+            missing_evidence=[
+                item
+                for item in _json_list(recommendation.missing_evidence_json)
+                if isinstance(item, str)
+            ],
+            limitations=[
+                item
+                for item in _json_list(recommendation.limitations_json)
+                if isinstance(item, str)
+            ],
+            requires_human_review=recommendation.requires_human_review,
+            risk_level=recommendation.risk_level,
+            risk_score=recommendation.risk_score,
+            confidence_score=recommendation.confidence_score,
+            agent_run_id=recommendation.agent_run_id,
+            generated_at=recommendation.generated_at,
+        )
+
     async def _persist_assessments(
         self,
         event_id: str,
@@ -685,10 +833,11 @@ class AssessmentService:
         context_result,
         explanation_result,
         evidence_errors: dict[str, str],
+        workflow_state: dict[str, object],
         assessed_at: str,
-    ) -> None:
+    ) -> Recommendation:
         """
-        Upsert RiskAssessment and ConfidenceAssessment rows.
+        Upsert risk, confidence, and the event's canonical Recommendation rows.
 
         If an assessment already exists for this event (re-assessment),
         delete the old row first so the unique constraint on event_id is
@@ -720,10 +869,7 @@ class AssessmentService:
                 explanation_result.model_dump(mode="json"), default=str
             ),
             evidence_errors_json=json.dumps(evidence_errors),
-            workflow_state_json=json.dumps({
-                "before": "assessing",
-                "after": "awaiting_review",
-            }),
+            workflow_state_json=json.dumps(workflow_state),
             assessed_at=assessed_at,
             agent_run_id=explanation_result.agent_run_id,
         )
@@ -737,6 +883,36 @@ class AssessmentService:
             sources_required=conf_result.sources_required,
             assessed_at=assessed_at,
         )
+        recommendation_result = await self._session.execute(
+            select(Recommendation).where(Recommendation.event_id == event_id)
+        )
+        recommendation = recommendation_result.scalar_one_or_none()
+        recommendation_values = {
+            "summary": explanation_result.summary,
+            "recommended_action": explanation_result.recommended_action,
+            "why_json": json.dumps(
+                [reason.model_dump(mode="json") for reason in explanation_result.why]
+            ),
+            "missing_evidence_json": json.dumps(explanation_result.missing_evidence),
+            "limitations_json": json.dumps(explanation_result.limitations),
+            "requires_human_review": True,
+            "risk_level": risk_result.risk_level,
+            "risk_score": risk_result.risk_score,
+            "confidence_score": conf_result.confidence_score,
+            "agent_run_id": explanation_result.agent_run_id,
+            "generated_at": assessed_at,
+        }
+        if recommendation is None:
+            recommendation = Recommendation(
+                id=str(uuid.uuid4()),
+                event_id=event_id,
+                **recommendation_values,
+            )
+            self._session.add(recommendation)
+        else:
+            for field, value in recommendation_values.items():
+                setattr(recommendation, field, value)
         self._session.add(risk_row)
         self._session.add(conf_row)
         await self._session.flush()
+        return recommendation

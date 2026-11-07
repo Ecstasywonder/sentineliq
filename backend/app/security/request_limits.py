@@ -10,10 +10,6 @@ from starlette.types import Message, Receive, Scope, Send
 ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 
-class _RequestBodyTooLarge(Exception):
-    pass
-
-
 class RequestBodyLimitMiddleware:
     """Reject oversized bodies without buffering an unbounded chunked upload."""
 
@@ -55,21 +51,39 @@ class RequestBodyLimitMiddleware:
                 await self._too_large(scope, receive, send)
                 return
 
-        received = 0
-
-        async def limited_receive() -> Message:
-            nonlocal received
+        # Read at most the configured ceiling before entering framework body
+        # parsing. Raising from ``receive`` is not reliable because Starlette
+        # can translate that exception into a generic 400 response. This
+        # bounded buffer preserves a deterministic 413 for chunked uploads
+        # without ever allocating an unbounded request body.
+        body = bytearray()
+        while True:
             message = await receive()
-            if message["type"] == "http.request":
-                received += len(message.get("body", b""))
-                if received > self.max_body_size:
-                    raise _RequestBodyTooLarge
-            return message
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_body_size:
+                await self._too_large(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
 
-        try:
-            await self.app(scope, limited_receive, send)
-        except _RequestBodyTooLarge:
-            await self._too_large(scope, receive, send)
+        delivered = False
+
+        async def replay_receive() -> Message:
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {
+                    "type": "http.request",
+                    "body": bytes(body),
+                    "more_body": False,
+                }
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
 
     async def _too_large(self, scope: Scope, receive: Receive, send: Send) -> None:
         await self._error(

@@ -4,6 +4,7 @@ Authentication endpoints — Gate 6.
 Routes:
     POST /api/v1/auth/token    Login — issue access + refresh tokens
     POST /api/v1/auth/refresh  Exchange refresh token for new access token
+    POST /api/v1/auth/logout   Revoke the presented refresh-token family
     GET  /api/v1/auth/me       Return current user identity
 """
 
@@ -169,9 +170,7 @@ async def refresh(
         raise _401
 
     token_result = await session.execute(
-        select(RefreshToken)
-        .where(RefreshToken.token_id == claims.token_id)
-        .with_for_update()
+        select(RefreshToken).where(RefreshToken.token_id == claims.token_id).with_for_update()
     )
     stored = token_result.scalar_one_or_none()
     now = datetime.now(UTC)
@@ -180,14 +179,10 @@ async def refresh(
         raise _401
 
     replayed = (
-        family.revoked_at is not None
-        or stored.used_at is not None
-        or stored.revoked_at is not None
+        family.revoked_at is not None or stored.used_at is not None or stored.revoked_at is not None
     )
     expired = _as_utc(stored.expires_at) <= now
-    family_mismatch = (
-        stored.family_id != claims.family_id or stored.user_id != claims.user_id
-    )
+    family_mismatch = stored.family_id != claims.family_id or stored.user_id != claims.user_id
     if replayed or expired or family_mismatch:
         # Persist family revocation before returning 401; allowing the request
         # dependency to roll back would silently defeat replay containment.
@@ -250,6 +245,68 @@ async def refresh(
         refresh_token=new_refresh_token,
         expires_in=s.access_token_expire_minutes * 60,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/auth/logout
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke the presented refresh-token family",
+)
+async def logout(
+    body: RefreshRequest,
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Revoke every refresh token in a login family.
+
+    The response deliberately does not reveal whether the token was malformed,
+    expired, issued by this service, or already revoked.  A caller can safely
+    retry logout, while a valid token from an earlier rotation still revokes its
+    active descendant.
+    """
+    try:
+        claims = decode_refresh_token_claims(body.refresh_token)
+    except TokenError:
+        return
+
+    family_result = await session.execute(
+        select(RefreshTokenFamily)
+        .where(RefreshTokenFamily.family_id == claims.family_id)
+        .with_for_update()
+    )
+    family = family_result.scalar_one_or_none()
+    if family is None or family.user_id != claims.user_id:
+        return
+
+    token_result = await session.execute(
+        select(RefreshToken).where(RefreshToken.token_id == claims.token_id)
+    )
+    stored = token_result.scalar_one_or_none()
+    if (
+        stored is None
+        or stored.family_id != family.family_id
+        or stored.user_id != claims.user_id
+        or stored.token_hash != _token_hash(body.refresh_token)
+    ):
+        return
+
+    # Preserve the first revocation timestamp so repeated logout calls are
+    # idempotent, including when the client retries after a lost response.
+    if family.revoked_at is None:
+        now = datetime.now(UTC)
+        family.revoked_at = now
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.family_id == family.family_id)
+            .where(RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        await session.commit()
+        logger.info("auth.logout", user_id=family.user_id, family_id=family.family_id)
 
 
 # ---------------------------------------------------------------------------

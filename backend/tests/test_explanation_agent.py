@@ -392,9 +392,7 @@ class TestParseAndValidate:
     def test_incomplete_object_is_rejected(self):
         svc = self._svc()
         with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate(
-                "EVT-001", "{}", 0.5, "medium", 0.8, {}, source="watsonx_ai"
-            )
+            svc._parse_and_validate("EVT-001", "{}", 0.5, "medium", 0.8, {}, source="watsonx_ai")
 
     def test_mismatched_boolean_flags_are_rejected(self):
         svc = self._svc()
@@ -562,9 +560,7 @@ class TestParseAndValidate:
             }
         )
         with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate(
-                "EVT-001", raw, 0.7, "high", 0.8, {}, source="watsonx_ai"
-            )
+            svc._parse_and_validate("EVT-001", raw, 0.7, "high", 0.8, {}, source="watsonx_ai")
 
     def test_why_items_with_empty_text_are_rejected(self):
         svc = self._svc()
@@ -703,9 +699,7 @@ class TestParseAndValidate:
         )
 
         with pytest.raises(ValueError, match="prohibited enforcement"):
-            svc._parse_and_validate(
-                "EVT-001", raw, 0.7, "high", 0.8, {}, source="watsonx_ai"
-            )
+            svc._parse_and_validate("EVT-001", raw, 0.7, "high", 0.8, {}, source="watsonx_ai")
 
     def test_enforcement_in_summary_is_rejected(self):
         svc = self._svc()
@@ -741,9 +735,7 @@ class TestParseAndValidate:
             }
         )
         with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate(
-                "EVT-001", raw, 0.9, "high", 0.8, {}, source="watsonx_ai"
-            )
+            svc._parse_and_validate("EVT-001", raw, 0.9, "high", 0.8, {}, source="watsonx_ai")
 
 
 # ---------------------------------------------------------------------------
@@ -874,11 +866,15 @@ class TestLLMPaths:
                 evidence_errors={},
             )
 
-        rows = list((await db_session.execute(
-            select(AgentRun)
-            .where(AgentRun.event_id == event.id)
-            .where(AgentRun.agent_name == "sentinel_explanation_agent")
-        )).scalars())
+        rows = list(
+            (
+                await db_session.execute(
+                    select(AgentRun)
+                    .where(AgentRun.event_id == event.id)
+                    .where(AgentRun.agent_name == "sentinel_explanation_agent")
+                )
+            ).scalars()
+        )
         assert len(rows) == 2
         assert len({row.id for row in rows}) == 2
         assert {row.status for row in rows} == {"failed", "failed_fallback"}
@@ -1042,4 +1038,9 @@ async def test_assessment_bundle_tool_reconstructs_persisted_run(db_session, cli
     assert bundle["triage"]["event_id"] == "EXPL-BUNDLE-001"
     assert bundle["context"]["event_id"] == "EXPL-BUNDLE-001"
     assert bundle["explanation"]["event_id"] == "EXPL-BUNDLE-001"
-    assert bundle["workflow_state"]["after"] == "awaiting_review"
+    assert bundle["recommendation_id"]
+    assert bundle["recommendation"]["id"] == bundle["recommendation_id"]
+    assert bundle["recommendation"]["recommended_action"]
+    assert bundle["recommendation"]["requires_human_review"] is True
+    assert bundle["workflow_state"]["event_status"]["after"] == "awaiting_review"
+    assert bundle["workflow_state"]["human_review_required"] is True

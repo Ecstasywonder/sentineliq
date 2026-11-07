@@ -76,8 +76,7 @@ class EventIngestRequest(BaseModel):
     def validate_event_type(cls, v: str) -> str:
         if v not in _EVENT_TYPES_SET:
             raise ValueError(
-                f"event_type '{v}' is not recognised. "
-                f"Valid types: {sorted(_EVENT_TYPES_SET)}"
+                f"event_type '{v}' is not recognised. Valid types: {sorted(_EVENT_TYPES_SET)}"
             )
         return v
 
@@ -167,9 +166,7 @@ class EventResponse(BaseModel):
             thumbnail_url=e.thumbnail_url,
             status=e.status,
             risk=RiskSummary(score=e.risk_score, level=e.risk_level),
-            confidence=ConfidenceSummary(
-                score=e.confidence_score, level=e.confidence_level
-            ),
+            confidence=ConfidenceSummary(score=e.confidence_score, level=e.confidence_level),
             agent_run_id=e.agent_run_id,
             created_at=e.created_at.isoformat() if e.created_at else "",
             updated_at=e.updated_at.isoformat() if e.updated_at else "",

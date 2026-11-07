@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.incident import IncidentHistory
 from app.repositories.events import IncidentRepository, SecurityEventRepository
-from app.services.simulator import event_payload, load_scenarios, persist_scenarios, select_scenarios
+from app.services.simulator import (
+    event_payload,
+    load_scenarios,
+    persist_scenarios,
+    select_scenarios,
+)
 
 
 def test_dataset_covers_all_required_scenario_types() -> None:
@@ -36,7 +41,10 @@ def test_dataset_covers_all_required_scenario_types() -> None:
         "stale-evidence",
     } == scenario_ids
     assert {scenario["expected_risk"] for scenario in scenarios} == {
-        "low", "medium", "high", "critical"
+        "low",
+        "medium",
+        "high",
+        "critical",
     }
     assert event_payload(scenarios[0]) == event_payload(scenarios[0])
 

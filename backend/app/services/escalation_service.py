@@ -108,14 +108,10 @@ class EscalationService:
         # ---- 2. Validate params ------------------------------------------
         if destination not in VALID_DESTINATIONS:
             raise ValueError(
-                f"Unknown destination '{destination}'. "
-                f"Valid: {sorted(VALID_DESTINATIONS)}"
+                f"Unknown destination '{destination}'. Valid: {sorted(VALID_DESTINATIONS)}"
             )
         if priority not in VALID_PRIORITIES:
-            raise ValueError(
-                f"Unknown priority '{priority}'. "
-                f"Valid: {sorted(VALID_PRIORITIES)}"
-            )
+            raise ValueError(f"Unknown priority '{priority}'. Valid: {sorted(VALID_PRIORITIES)}")
 
         # ---- 3. Persist Escalation row -----------------------------------
         actor_role = actor.roles[0] if actor.roles else "unknown"
@@ -135,20 +131,24 @@ class EscalationService:
         self._session.add(row)
 
         # ---- 4. Write immutable AuditEvent -------------------------------
-        self._session.add(AuditEvent(
-            id=str(uuid.uuid4()),
-            event_id=event_id,
-            action="escalated",
-            actor=actor.email,
-            actor_role=actor_role,
-            occurred_at=escalated_at,
-            details_json=json.dumps({
-                "escalation_id": row.id,
-                "destination": destination,
-                "priority": priority,
-                "note_provided": note is not None,
-            }),
-        ))
+        self._session.add(
+            AuditEvent(
+                id=str(uuid.uuid4()),
+                event_id=event_id,
+                action="escalated",
+                actor=actor.email,
+                actor_role=actor_role,
+                occurred_at=escalated_at,
+                details_json=json.dumps(
+                    {
+                        "escalation_id": row.id,
+                        "destination": destination,
+                        "priority": priority,
+                        "note_provided": note is not None,
+                    }
+                ),
+            )
+        )
 
         await self._session.flush()
 
@@ -203,9 +203,7 @@ class EscalationService:
         event = await self._load_event(event_id)
         row = await self.get_latest(event_id)
         if row is None:
-            raise ValueError(
-                f"Escalation not found for event '{event_id}'."
-            )
+            raise ValueError(f"Escalation not found for event '{event_id}'.")
 
         # Validate escalation status transition
         if new_status not in ESCALATION_TRANSITIONS.get(row.status, frozenset()):
@@ -239,21 +237,25 @@ class EscalationService:
             self._session.add(event)
 
         # Immutable audit entry
-        self._session.add(AuditEvent(
-            id=str(uuid.uuid4()),
-            event_id=event_id,
-            action="status_changed",
-            actor=actor.email,
-            actor_role=actor_role,
-            occurred_at=occurred_at,
-            details_json=json.dumps({
-                "entity": "escalation",
-                "escalation_id": row.id,
-                "old_status": old_status,
-                "new_status": new_status,
-                "note_provided": note is not None,
-            }),
-        ))
+        self._session.add(
+            AuditEvent(
+                id=str(uuid.uuid4()),
+                event_id=event_id,
+                action="status_changed",
+                actor=actor.email,
+                actor_role=actor_role,
+                occurred_at=occurred_at,
+                details_json=json.dumps(
+                    {
+                        "entity": "escalation",
+                        "escalation_id": row.id,
+                        "old_status": old_status,
+                        "new_status": new_status,
+                        "note_provided": note is not None,
+                    }
+                ),
+            )
+        )
 
         await self._session.flush()
 

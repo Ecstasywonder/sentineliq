@@ -62,7 +62,7 @@ class MockScheduleAdapter(ScheduleAdapter):
                 "error_message": None,
                 "adapter_class": f"{self.__class__.__module__}.{self.__class__.__name__}",
             }
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("schedule_health_check_failed", error=str(exc))
             return {
                 "source_id": self.source_id,

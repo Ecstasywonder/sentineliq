@@ -196,7 +196,7 @@ async def test_watsonx_embedding_requests_are_batched() -> None:
         enable_semantic_search=True,
         watsonx_active=True,
         effective_watsonx_api_key="test-key",
-        effective_watsonx_base_url="https://example.invalid",
+        effective_watsonx_base_url="https://us-south.ml.cloud.ibm.com",
         watsonx_api_version="2024-05-31",
         watsonx_embedding_model_id="ibm/slate-30m-english-rtrvr",
         effective_watsonx_space_id="space-id",
@@ -252,6 +252,34 @@ async def test_watsonx_embedding_requests_are_batched() -> None:
 
 
 @pytest.mark.asyncio
+async def test_watsonx_embedding_rejects_unsafe_host_before_iam_or_http() -> None:
+    service = KnowledgeRetrievalService(MagicMock())
+    settings = MagicMock(
+        enable_semantic_search=True,
+        watsonx_active=True,
+        effective_watsonx_api_key="test-key",
+        effective_watsonx_base_url="https://us-south.ml.cloud.ibm.com.evil.example",
+        watsonx_api_version="2024-05-31",
+        watsonx_embedding_model_id="ibm/slate-30m-english-rtrvr",
+        effective_watsonx_space_id="space-id",
+        agent_invoke_timeout=10.0,
+    )
+    iam_exchange = AsyncMock(return_value="must-not-be-used")
+
+    with (
+        patch("app.services.knowledge_retrieval.get_settings", return_value=settings),
+        patch.object(service, "_watsonx_iam_token", iam_exchange),
+        patch("app.services.knowledge_retrieval.httpx.AsyncClient") as async_client,
+    ):
+        vectors = await service._semantic_vectors(["evidence"])
+
+    iam_exchange.assert_not_awaited()
+    async_client.assert_not_called()
+    assert len(vectors) == 1
+    assert service._embedding_provider == "domain_hash_v1"
+
+
+@pytest.mark.asyncio
 async def test_knowledge_search_api_exposes_citable_contract(
     client,
     db_session: AsyncSession,
@@ -276,4 +304,3 @@ async def test_knowledge_search_api_exposes_citable_contract(
     assert body["meta"]["retrieval_mode"] == "hybrid"
     assert body["results"][0]["evidence_id"] == f"incident:{incident.id}"
     assert body["results"][0]["trust_boundary"] == "untrusted_evidence"
-

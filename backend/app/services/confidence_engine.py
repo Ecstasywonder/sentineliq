@@ -67,7 +67,7 @@ class SourceStatus:
 
     source_id: str
     available: bool
-    stale: bool = False   # True if data is older than the configured freshness window
+    stale: bool = False  # True if data is older than the configured freshness window
     required: bool = True  # False for optional sources whose absence is less significant
 
 
@@ -75,10 +75,10 @@ class SourceStatus:
 class ConfidenceReductionRecord:
     """A single applied reduction, serialised to the DB."""
 
-    reason: str       # ConfidenceReduction value
+    reason: str  # ConfidenceReduction value
     amount: float
     source_id: str = ""  # populated when reason is source-specific
-    detail: str = ""     # free-form detail for audit
+    detail: str = ""  # free-form detail for audit
 
 
 @dataclass
@@ -90,8 +90,8 @@ class ConfidenceResult:
     ``confidence_assessments.reductions_json`` for audit.
     """
 
-    confidence_score: float   # clamped [0.0, 1.0]
-    confidence_level: str     # high | medium | low
+    confidence_score: float  # clamped [0.0, 1.0]
+    confidence_level: str  # high | medium | low
     reductions: list[ConfidenceReductionRecord] = field(default_factory=list)
     sources_available: int = 0
     sources_required: int = 0
@@ -281,8 +281,7 @@ class ConfidenceEngine:
                     reason=ConfidenceReduction.LLM_UNAVAILABLE.value,
                     amount=amount,
                     detail=(
-                        "Explanation Agent was unavailable; "
-                        "LLM assessment could not be produced."
+                        "Explanation Agent was unavailable; LLM assessment could not be produced."
                     ),
                 )
             )

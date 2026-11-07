@@ -19,7 +19,8 @@ class CoordinatorAgentOutput(BaseModel):
 
     event_id: str = Field(min_length=1, max_length=128)
     assessment_ready: bool
-    summary: str = Field(min_length=1, max_length=1024)
+    # No max_length here — the service truncates to 1024 after sanitisation
+    summary: str = Field(min_length=1, max_length=8192)
     missing_evidence: list[str] = Field(max_length=64)
     human_review_required: bool
 

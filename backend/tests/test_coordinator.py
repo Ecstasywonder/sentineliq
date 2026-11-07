@@ -109,7 +109,7 @@ async def _make_event(
         facility_id=_FAC,
         zone="restricted_after_hours",
         status=status,
-        provider="test",
+        source_adapter="test",
         provider_event_id=_uid(),
     )
     session.add(evt)

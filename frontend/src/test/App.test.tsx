@@ -800,4 +800,287 @@ describe("App", () => {
       await screen.findByText("No decisions have been recorded for this event."),
     ).toBeInTheDocument();
   });
+
+  // ── Gate 18: Audit trail navigation ────────────────────────────────────
+
+  it("shows the Audit trail nav link for roles with audit:read", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(supervisorLoginMocks()[0])
+        .mockResolvedValueOnce(supervisorLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([])),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Audit trail" }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Audit trail nav link for officer role", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(loginMocks()[0])
+        .mockResolvedValueOnce(loginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([])),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await screen.findByRole("button", { name: "Refresh queue" });
+    expect(screen.queryByRole("button", { name: "Audit trail" })).not.toBeInTheDocument();
+  });
+
+  it("renders the audit trail page when Audit trail nav is clicked", async () => {
+    const auditResponse = {
+      items: [
+        {
+          audit_id: "aud-001",
+          event_id: "e1",
+          action: "risk_assessed",
+          actor: "system:assessment_service",
+          actor_role: null,
+          occurred_at: "2026-01-01T12:05:00Z",
+          details: { risk_score: 82, risk_level: "critical" },
+          redacted: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(supervisorLoginMocks()[0])
+        .mockResolvedValueOnce(supervisorLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([]))
+        .mockResolvedValueOnce(new Response(JSON.stringify(auditResponse), { status: 200 })),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(await screen.findByRole("button", { name: "Audit trail" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Audit trail", level: 1 }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("risk assessed")).toBeInTheDocument();
+    expect(screen.getByText("system:assessment_service")).toBeInTheDocument();
+  });
+
+  // ── Gate 18: Event audit panel in EventDetail ───────────────────────────
+
+  it("shows the event audit trail panel for supervisor role in event detail", async () => {
+    const event = makeEvent();
+    const assessment = makeAssessment();
+    const auditResponse = {
+      items: [
+        {
+          audit_id: "aud-002",
+          event_id: "e1",
+          action: "risk_assessed",
+          actor: "system:assessment_service",
+          actor_role: null,
+          occurred_at: "2026-01-01T12:05:00Z",
+          details: null,
+          redacted: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(supervisorLoginMocks()[0])
+        .mockResolvedValueOnce(supervisorLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([event]))
+        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(decisionHistoryResponse())
+        .mockResolvedValueOnce(new Response(JSON.stringify(auditResponse), { status: 200 })),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(
+      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+    );
+
+    expect(await screen.findByText("Complete event audit trail")).toBeInTheDocument();
+    expect(await screen.findByText("risk assessed")).toBeInTheDocument();
+  });
+
+  it("hides the event audit trail panel for officer role", async () => {
+    const event = makeEvent();
+    const assessment = makeAssessment();
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(loginMocks()[0])
+        .mockResolvedValueOnce(loginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([event]))
+        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(decisionHistoryResponse()),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(
+      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+    );
+
+    await screen.findByText("Decision timeline");
+    expect(screen.queryByText("Complete event audit trail")).not.toBeInTheDocument();
+  });
+
+  it("shows audit entry details when Show details is clicked", async () => {
+    const event = makeEvent();
+    const assessment = makeAssessment();
+    const auditResponse = {
+      items: [
+        {
+          audit_id: "aud-003",
+          event_id: "e1",
+          action: "human_decision",
+          actor: "officer@example.com",
+          actor_role: "officer",
+          occurred_at: "2026-01-01T13:00:00Z",
+          details: { decision: "escalate", rationale: "Needs review" },
+          redacted: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(supervisorLoginMocks()[0])
+        .mockResolvedValueOnce(supervisorLoginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([event]))
+        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(decisionHistoryResponse())
+        .mockResolvedValueOnce(new Response(JSON.stringify(auditResponse), { status: 200 })),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(
+      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+    );
+
+    const detailsBtn = await screen.findByRole("button", { name: "Show details" });
+    await user.click(detailsBtn);
+    expect(screen.getByText(/Needs review/)).toBeInTheDocument();
+  });
+
+  // ── Gate 18: Risk-policy reference panel ───────────────────────────────
+
+  it("shows the risk-policy reference button for security_admin role", async () => {
+    const event = makeEvent();
+    const assessment = makeAssessment();
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 900 }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ id: "u3", email: "admin@example.com", full_name: "Admin", roles: ["security_admin"], is_active: true }),
+            { status: 200 },
+          ),
+        )
+        .mockResolvedValueOnce(queueResponse([event]))
+        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(decisionHistoryResponse()),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(
+      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+    );
+
+    expect(await screen.findByText("Risk-policy reference")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Load policy details" }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the risk-policy reference panel for officer role", async () => {
+    const event = makeEvent();
+    const assessment = makeAssessment();
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(loginMocks()[0])
+        .mockResolvedValueOnce(loginMocks()[1])
+        .mockResolvedValueOnce(queueResponse([event]))
+        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(decisionHistoryResponse()),
+    );
+
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(
+      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+    );
+
+    await screen.findByText("Decision timeline");
+    expect(screen.queryByText("Risk-policy reference")).not.toBeInTheDocument();
+  });
 });

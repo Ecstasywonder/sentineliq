@@ -1,5 +1,68 @@
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
+// ---------------------------------------------------------------------------
+// Gate 18 — Audit and history types
+// ---------------------------------------------------------------------------
+
+export interface AuditEntry {
+  audit_id: string;
+  event_id: string | null;
+  action: string;
+  actor: string;
+  actor_role: string | null;
+  occurred_at: string;
+  details: Record<string, unknown> | null;
+  redacted: boolean;
+}
+
+export interface AuditList {
+  items: AuditEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export interface RiskPolicyFactor {
+  id: string;
+  factor_id: string;
+  label: string;
+  weight: number;
+  direction: string;
+  description: string | null;
+  is_active: boolean;
+}
+
+export interface RiskPolicyDetail {
+  id: string;
+  version: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  effective_from: string;
+  factors: RiskPolicyFactor[];
+}
+
+export interface RiskPolicyList {
+  items: RiskPolicyDetail[];
+  total: number;
+}
+
+export interface EscalationDetail {
+  escalation_id: string;
+  event_id: string;
+  destination: string;
+  priority: string;
+  status: string;
+  note: string | null;
+  escalated_by: string;
+  escalated_by_role: string;
+  escalated_at: string;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  event_status: string;
+}
+
 export interface SecurityEvent {
   id: string;
   provider_event_id: string | null;
@@ -369,4 +432,33 @@ export const getEscalation = (eventId: string) =>
 export const getDecisionHistory = (eventId: string) =>
   request<{ decisions: Decision[] }>(
     `/events/${encodeURIComponent(eventId)}/decisions`,
+  );
+
+// ---------------------------------------------------------------------------
+// Gate 18 — Audit, risk-policy, escalation detail
+// ---------------------------------------------------------------------------
+
+export const getEventAudit = (eventId: string, page = 1) =>
+  request<AuditList>(
+    `/events/${encodeURIComponent(eventId)}/audit?page=${page}&page_size=50`,
+  );
+
+export const getGlobalAudit = (page = 1, action = "", actor = "") => {
+  const params = new URLSearchParams({ page: String(page), page_size: "50" });
+  if (action) params.set("action", action);
+  if (actor) params.set("actor", actor);
+  return request<AuditList>(`/audit?${params}`);
+};
+
+export const getRiskPolicies = () =>
+  request<RiskPolicyList>("/risk-policies");
+
+export const getRiskPolicy = (policyId: string) =>
+  request<RiskPolicyDetail>(
+    `/risk-policies/${encodeURIComponent(policyId)}`,
+  );
+
+export const getEventEscalationDetail = (eventId: string) =>
+  request<EscalationDetail>(
+    `/events/${encodeURIComponent(eventId)}/escalation`,
   );

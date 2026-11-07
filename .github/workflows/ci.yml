@@ -13,7 +13,8 @@ on:
   pull_request:
     branches: [main]
 
-# Jobs only need repository contents.  Keep the workflow token read-only.
+# Keep the workflow token read-only. The secret-scan job adds read-only PR
+# metadata access for selecting the pull-request commit range.
 permissions:
   contents: read
 
@@ -45,26 +46,30 @@ jobs:
       # Keep the resolver itself reproducible.  Application dependency ranges
       # are audited below until the project adopts a committed uv.lock.
       - name: Install uv
-        run: pip install --disable-pip-version-check "uv==0.6.3"
+        run: pip install --disable-pip-version-check "uv==0.13.7"
 
       - name: Install dependencies
         run: uv pip install --system -e ".[dev]"
 
       - name: Audit Python dependencies
-        # pip-audit --strict rejects intentionally skipped editable installs.
-        # Allow only the unpublished first-party project to be skipped, and
-        # fail if any other package is skipped or any advisory is found.
+        # Snapshot the application environment before installing the auditor,
+        # so the auditor's own transitive dependencies are not mistaken for
+        # application dependencies.
         run: |
+          uv pip install --system "setuptools==84.1.0"
+          python -m pip freeze --exclude-editable > /tmp/pip-audit-requirements.txt
           uv pip install --system "pip-audit==2.9.0"
-          pip-audit --skip-editable --format json --output /tmp/pip-audit-report.json
+          pip-audit --strict --requirement /tmp/pip-audit-requirements.txt --format json --output /tmp/pip-audit-report.json
           python - <<'PY'
           import json
           from pathlib import Path
 
           report = json.loads(Path("/tmp/pip-audit-report.json").read_text())
-          skipped = [dependency for dependency in report["dependencies"] if "skip_reason" in dependency]
-          expected = [{"name": "sentineliq-backend", "skip_reason": "distribution marked as editable"}]
-          if skipped != expected:
+          dependencies = report["dependencies"]
+          if not dependencies:
+              raise SystemExit("Python dependency audit did not inspect any distributions")
+          skipped = [dependency for dependency in dependencies if "skip_reason" in dependency]
+          if skipped:
               raise SystemExit(f"Unexpected unaudited Python distributions: {skipped}")
           PY
 
@@ -148,15 +153,21 @@ jobs:
   security:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    # The action reads PR commit metadata to select the scan range. It does not
+    # need write access because inline PR comments are disabled below.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0   # full history required for accurate scan
 
       - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@v2.3.9
+        uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
 
   # ---------------------------------------------------------------------------
   # Container supply chain — build the exact production Dockerfiles and scan
@@ -174,7 +185,7 @@ jobs:
         run: docker build --pull --tag sentineliq-backend:ci -f infra/docker/Dockerfile.backend backend
 
       - name: Scan backend production image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: sentineliq-backend:ci
           format: table
@@ -187,7 +198,7 @@ jobs:
         run: docker build --pull --tag sentineliq-frontend:ci -f infra/docker/Dockerfile.frontend frontend
 
       - name: Scan frontend production image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: sentineliq-frontend:ci
           format: table

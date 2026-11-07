@@ -688,6 +688,80 @@ button.small {
   font-weight: 700;
 }
 
+/* ── Gate 19 — Admin page ────────────────────────────────────────────────── */
+
+.admin-count {
+  color: var(--color-muted);
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+
+.admin-muted {
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}
+
+.admin-active {
+  color: var(--color-risk-low);
+  font-weight: 700;
+}
+
+.admin-inactive {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.role-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.admin-roles-list {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-role-entry {
+  padding: 0.9rem 0;
+  border-top: 1px solid #e8edf3;
+}
+
+.admin-role-entry:first-child {
+  border-top: 0;
+}
+
+.admin-role-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.admin-role-desc {
+  color: var(--color-muted);
+  font-size: 0.87rem;
+}
+
+.admin-perm-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-perm-list li code {
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.3rem;
+  background: #f0f6ff;
+  color: #244a86;
+  font-size: 0.78rem;
+}
+
 @media (max-width: 720px) {
   .topbar {
     align-items: flex-start;

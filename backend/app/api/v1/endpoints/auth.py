@@ -4,31 +4,48 @@ Authentication endpoints — Gate 6.
 Routes:
     POST /api/v1/auth/token    Login — issue access + refresh tokens
     POST /api/v1/auth/refresh  Exchange refresh token for new access token
+    POST /api/v1/auth/logout   Revoke the presented refresh-token family
     GET  /api/v1/auth/me       Return current user identity
 """
 
 from __future__ import annotations
 
+import hashlib
+from datetime import UTC, datetime
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.session import get_db
+from app.models.refresh_token import RefreshToken, RefreshTokenFamily
 from app.models.user import Role, User, UserRole
 from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse, UserInfo
 from app.security.dependencies import CurrentUser
-from app.security.passwords import verify_password
+from app.security.passwords import verify_password_or_dummy
 from app.security.tokens import (
     TokenError,
     create_access_token,
-    create_refresh_token,
-    decode_refresh_token,
+    decode_refresh_token_claims,
+    issue_refresh_token,
 )
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+
+def _token_hash(token: str) -> str:
+    """Return a non-reversible binding for a refresh JWT."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalise SQLite-naive and PostgreSQL-aware timestamps."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 async def _load_user_roles(session: AsyncSession, user_id: str) -> list[str]:
@@ -71,7 +88,11 @@ async def login(
     result = await session.execute(stmt)
     user: User | None = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.hashed_password):
+    password_valid = verify_password_or_dummy(
+        body.password,
+        user.hashed_password if user is not None else None,
+    )
+    if user is None or not password_valid:
         raise _401
 
     if not user.is_active:
@@ -84,7 +105,22 @@ async def login(
     s = get_settings()
 
     access_token = create_access_token(user.id, roles)
-    refresh_token = create_refresh_token(user.id)
+    refresh_token, refresh_claims = issue_refresh_token(user.id)
+    session.add(
+        RefreshTokenFamily(
+            family_id=refresh_claims.family_id,
+            user_id=user.id,
+        )
+    )
+    session.add(
+        RefreshToken(
+            token_id=refresh_claims.token_id,
+            family_id=refresh_claims.family_id,
+            user_id=user.id,
+            token_hash=_token_hash(refresh_token),
+            expires_at=refresh_claims.expires_at,
+        )
+    )
 
     logger.info("auth.login", user_id=user.id, roles=roles)
 
@@ -118,27 +154,159 @@ async def refresh(
     )
 
     try:
-        user_id = decode_refresh_token(body.refresh_token)
+        claims = decode_refresh_token_claims(body.refresh_token)
     except TokenError:
         raise _401 from None
 
-    user: User | None = await session.get(User, user_id)
+    # Every generation in a login session first locks the same family row.
+    # This prevents a descendant rotation from racing a replay revocation.
+    family_result = await session.execute(
+        select(RefreshTokenFamily)
+        .where(RefreshTokenFamily.family_id == claims.family_id)
+        .with_for_update()
+    )
+    family = family_result.scalar_one_or_none()
+    if family is None or family.user_id != claims.user_id:
+        raise _401
+
+    token_result = await session.execute(
+        select(RefreshToken).where(RefreshToken.token_id == claims.token_id).with_for_update()
+    )
+    stored = token_result.scalar_one_or_none()
+    now = datetime.now(UTC)
+
+    if stored is None or stored.token_hash != _token_hash(body.refresh_token):
+        raise _401
+
+    replayed = (
+        family.revoked_at is not None or stored.used_at is not None or stored.revoked_at is not None
+    )
+    expired = _as_utc(stored.expires_at) <= now
+    family_mismatch = stored.family_id != claims.family_id or stored.user_id != claims.user_id
+    if replayed or expired or family_mismatch:
+        # Persist family revocation before returning 401; allowing the request
+        # dependency to roll back would silently defeat replay containment.
+        family.revoked_at = now
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.family_id == stored.family_id)
+            .values(revoked_at=now)
+        )
+        await session.commit()
+        logger.warning(
+            "auth.refresh_replay_rejected",
+            user_id=stored.user_id,
+            family_id=stored.family_id,
+            token_id=stored.token_id,
+        )
+        raise _401
+
+    user: User | None = await session.get(User, claims.user_id)
     if user is None or not user.is_active:
+        family.revoked_at = now
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.family_id == stored.family_id)
+            .values(revoked_at=now)
+        )
+        await session.commit()
         raise _401
 
     roles = await _load_user_roles(session, user.id)
     s = get_settings()
 
     access_token = create_access_token(user.id, roles)
-    new_refresh_token = create_refresh_token(user.id)
+    new_refresh_token, new_claims = issue_refresh_token(
+        user.id,
+        family_id=stored.family_id,
+    )
+    stored.used_at = now
+    stored.replaced_by_token_id = new_claims.token_id
+    session.add(
+        RefreshToken(
+            token_id=new_claims.token_id,
+            family_id=new_claims.family_id,
+            user_id=user.id,
+            token_hash=_token_hash(new_refresh_token),
+            expires_at=new_claims.expires_at,
+        )
+    )
 
-    logger.info("auth.refresh", user_id=user.id)
+    logger.info(
+        "auth.refresh_rotated",
+        user_id=user.id,
+        family_id=stored.family_id,
+        old_token_id=stored.token_id,
+        new_token_id=new_claims.token_id,
+    )
 
     return TokenResponse(
         access_token=access_token,
         refresh_token=new_refresh_token,
         expires_in=s.access_token_expire_minutes * 60,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/auth/logout
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke the presented refresh-token family",
+)
+async def logout(
+    body: RefreshRequest,
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Revoke every refresh token in a login family.
+
+    The response deliberately does not reveal whether the token was malformed,
+    expired, issued by this service, or already revoked.  A caller can safely
+    retry logout, while a valid token from an earlier rotation still revokes its
+    active descendant.
+    """
+    try:
+        claims = decode_refresh_token_claims(body.refresh_token)
+    except TokenError:
+        return
+
+    family_result = await session.execute(
+        select(RefreshTokenFamily)
+        .where(RefreshTokenFamily.family_id == claims.family_id)
+        .with_for_update()
+    )
+    family = family_result.scalar_one_or_none()
+    if family is None or family.user_id != claims.user_id:
+        return
+
+    token_result = await session.execute(
+        select(RefreshToken).where(RefreshToken.token_id == claims.token_id)
+    )
+    stored = token_result.scalar_one_or_none()
+    if (
+        stored is None
+        or stored.family_id != family.family_id
+        or stored.user_id != claims.user_id
+        or stored.token_hash != _token_hash(body.refresh_token)
+    ):
+        return
+
+    # Preserve the first revocation timestamp so repeated logout calls are
+    # idempotent, including when the client retries after a lost response.
+    if family.revoked_at is None:
+        now = datetime.now(UTC)
+        family.revoked_at = now
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.family_id == family.family_id)
+            .where(RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        await session.commit()
+        logger.info("auth.logout", user_id=family.user_id, family_id=family.family_id)
 
 
 # ---------------------------------------------------------------------------

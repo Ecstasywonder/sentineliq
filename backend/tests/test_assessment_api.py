@@ -7,28 +7,72 @@ Tests cover:
   - Evidence signals: after_hours, unverified_person, no_work_order, etc.
   - Re-assessment: calling assess twice replaces old RiskAssessment row
   - 404: event not found
-  - 409: event in wrong state (already awaiting_review, dismissed, etc.)
+  - Idempotent replay: duplicate calls return the persisted bundle
+  - 409: unassessed event in a terminal state
   - Unavailable source override in request body
   - Risk & confidence values are independent (ADR-003 / ADR-004)
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
+from app.db.session import Base
 from app.models.access import AccessEvent
 from app.models.assessment import ConfidenceAssessment, RiskAssessment
+from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.models.incident import IncidentHistory
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
 from app.models.schedule import Schedule
 from app.models.work_order import WorkOrder
+from app.services.assessment_service import AssessmentService
+from app.services.triage_service import TriageService
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_aggregator_error_keys_mark_canonical_sources_unavailable(
+    db_session: AsyncSession,
+) -> None:
+    from types import SimpleNamespace
+
+    service = AssessmentService(db_session)
+    evidence = SimpleNamespace(
+        access_events=object(),
+        schedule=object(),
+        work_orders=object(),
+        delivery=object(),
+        location_policy=object(),
+        incident_history=object(),
+    )
+    normalized = service._normalize_evidence_errors(
+        {
+            "access_events": "timeout",
+            "schedule": "connection failed",
+        }
+    )
+    statuses = service._build_source_statuses(evidence, set(), normalized)
+    by_id = {status.source_id: status.available for status in statuses}
+
+    assert normalized == {
+        "mock_access_control": "timeout",
+        "mock_schedule": "connection failed",
+    }
+    assert by_id["mock_access_control"] is False
+    assert by_id["mock_schedule"] is False
+    assert by_id["mock_work_order"] is True
+
 
 _LOC = "loc-gate8-test"
 _FAC = "fac-gate8-test"
@@ -95,23 +139,25 @@ async def _seed_risk_policy(session: AsyncSession) -> RiskPolicy:
         name="Default v1.0",
         description="Test policy",
         is_active=True,
-        thresholds_json=_json.dumps({
-            "low":      {"min": 0.0,  "max": 29.0},
-            "medium":   {"min": 30.0, "max": 59.0},
-            "high":     {"min": 60.0, "max": 99.0},
-            "critical": {"min": 100.0, "max": None},
-        }),
+        thresholds_json=_json.dumps(
+            {
+                "low": {"min": 0.0, "max": 29.0},
+                "medium": {"min": 30.0, "max": 59.0},
+                "high": {"min": 60.0, "max": 99.0},
+                "critical": {"min": 100.0, "max": None},
+            }
+        ),
     )
     session.add(policy)
     await session.flush()
 
     factors = [
-        ("after_hours_access",    "After Hours Access",      40.0, "increase"),
-        ("unverified_person",     "Unverified Person",       50.0, "increase"),
-        ("no_work_order",         "No Work Order",           20.0, "increase"),
-        ("no_scheduled_entry",    "No Scheduled Entry",      20.0, "increase"),
-        ("known_incident_area",   "Known Incident Area",     30.0, "increase"),
-        ("critical_zone",         "Critical Zone",           40.0, "increase"),
+        ("after_hours_access", "After Hours Access", 40.0, "increase"),
+        ("unverified_person", "Unverified Person", 50.0, "increase"),
+        ("no_work_order", "No Work Order", 20.0, "increase"),
+        ("no_scheduled_entry", "No Scheduled Entry", 20.0, "increase"),
+        ("known_incident_area", "Known Incident Area", 30.0, "increase"),
+        ("critical_zone", "Critical Zone", 40.0, "increase"),
     ]
     for factor_id, label, weight, direction in factors:
         f = RiskPolicyFactor(
@@ -404,6 +450,105 @@ class TestAssessEventReassessment:
         )
         result = await db_session.execute(count_stmt)
         assert result.scalar_one() == 1
+
+
+async def test_concurrent_assessment_requests_execute_pipeline_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A conditional DB claim serialises concurrent callers per event.
+
+    A file-backed SQLite database gives each task an independent connection,
+    exercising the same compare-and-set behavior used on PostgreSQL rather
+    than relying on an in-process lock.
+    """
+    database_path = tmp_path / "assessment-concurrency.db"
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{database_path}",
+        connect_args={"timeout": 30},
+    )
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as seed_session:
+        await _seed_risk_policy(seed_session)
+        event = await _seed_event(
+            seed_session,
+            location_id=f"loc-concurrent-{_uid()[:6]}",
+        )
+        event_id = event.id
+        await seed_session.commit()
+
+    first_entered_pipeline = asyncio.Event()
+    release_first = asyncio.Event()
+    original_triage_run = TriageService.run
+    triage_calls = 0
+
+    async def _blocking_triage_run(self, *args, **kwargs):
+        nonlocal triage_calls
+        triage_calls += 1
+        if triage_calls == 1:
+            first_entered_pipeline.set()
+            await release_first.wait()
+        return await original_triage_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(TriageService, "run", _blocking_triage_run)
+
+    async def _assess_and_commit():
+        async with session_factory() as session:
+            result = await AssessmentService(session).run(event_id)
+            await session.commit()
+            return result
+
+    first = asyncio.create_task(_assess_and_commit())
+    await asyncio.wait_for(first_entered_pipeline.wait(), timeout=5)
+    second = asyncio.create_task(_assess_and_commit())
+    # Give the competing request a chance to reach the database claim while
+    # the first transaction still owns it.
+    await asyncio.sleep(0.05)
+    assert triage_calls == 1
+    release_first.set()
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert triage_calls == 1
+    assert first_result.event_status == "awaiting_review"
+    assert second_result.event_status == "awaiting_review"
+    assert second_result.assessed_at == first_result.assessed_at
+    assert second_result.risk_score == first_result.risk_score
+
+    async with session_factory() as verify_session:
+        risk_count = await verify_session.scalar(
+            select(func.count())
+            .select_from(RiskAssessment)
+            .where(RiskAssessment.event_id == event_id)
+        )
+        confidence_count = await verify_session.scalar(
+            select(func.count())
+            .select_from(ConfidenceAssessment)
+            .where(ConfidenceAssessment.event_id == event_id)
+        )
+        audit_count = await verify_session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.event_id == event_id,
+                AuditEvent.action == "risk_assessed",
+            )
+        )
+        persisted_event = await verify_session.get(SecurityEvent, event_id)
+
+    assert risk_count == 1
+    assert confidence_count == 1
+    assert audit_count == 1
+    assert persisted_event is not None
+    assert persisted_event.status == "awaiting_review"
+
+    await engine.dispose()
 
 
 class TestAssessEventErrorCases:

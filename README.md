@@ -19,83 +19,85 @@ SentinelIQ never autonomously enforces security actions.
 
 ## Project Status
 
-| Gate | Title | Branch | Status | Tests |
-|------|-------|--------|--------|-------|
-| 0 | Environment & Source-of-Truth Validation | `main` | ✅ Complete | — |
-| 1 | BRD, SOP & Architecture Specification | `main` | ✅ Complete | — |
-| 2 | Docker Compose, Dockerfiles & Bootstrap | `main` | ✅ Complete | — |
-| 3 | Data Models & Alembic Migration (26 tables) | `main` | ✅ Complete | 16 |
-| 4 | Deterministic Risk Engine & Confidence Engine | `main` | ✅ Complete | 74 |
-| 5 | Event Ingestion API | `main` | ✅ Complete | 113 |
-| 6 | RBAC & Authentication | `main` | ✅ Complete | 144 |
-| 7 | Evidence Retrieval API (Context Tools) | `main` | ✅ Complete | ~194 |
-| 8 | Evidence Aggregation Service & Assessment API | `main` | ✅ Complete | ~208 |
-| 9 | Risk Assessment API | `main` | ✅ Complete | ~238 |
-| 10 | Operator Decision API | `gate-10-operator-decision-api` → `main` | ✅ Complete | ~270 |
-| 11 | Escalation API | `gate-11-escalation-api` → `main` | ✅ Complete | ~304 |
-| 12 | Audit Trail API | `gate-12-audit-trail-api` → `main` | ✅ Complete | **313** |
-| 13 | Feedback API | `gate-13-feedback-api` → `main` | ✅ Complete | **334** |
-| 14 | Triage Agent (watsonx Orchestrate) | `gate-14-triage-agent` | 🔲 Next | — |
-| 15 | Context Agent (watsonx Orchestrate) | — | 🔲 Pending | — |
-| 16 | Explanation Agent (watsonx Orchestrate) | — | 🔲 Pending | — |
-| 17 | Sentinel Coordinator (watsonx Orchestrate) | — | 🔲 Pending | — |
-| 18 | Agent Tool Schemas (OpenAPI → Orchestrate) | — | 🔲 Pending | — |
-| 19 | End-to-End Assessment Flow | — | 🔲 Pending | — |
-| 20 | Seed Data & Demo Scenarios | — | 🔲 Pending | — |
-| 21 | Frontend Scaffold (React + Vite + TypeScript) | — | 🔲 Pending | — |
-| 22 | Event Queue UI | — | 🔲 Pending | — |
-| 23 | Event Detail & Evidence Panel UI | — | 🔲 Pending | — |
-| 24 | Decision Controls UI | — | 🔲 Pending | — |
-| 25 | Escalation UI | — | 🔲 Pending | — |
-| 26 | Audit Trail UI | — | 🔲 Pending | — |
-| 27 | Admin UI (Risk Policy, Users) | — | 🔲 Pending | — |
-| 28 | Integration Health Dashboard UI | — | 🔲 Pending | — |
-| 29 | Agent Evaluation Framework | — | 🔲 Pending | — |
-| 30 | Evaluation Dataset (5 BRD scenarios) | — | 🔲 Pending | — |
-| 31 | CI Pipeline (GitHub Actions) | — | 🔲 Pending | — |
-| 32 | Full Stack Docker Compose | — | 🔲 Pending | — |
-| 33 | Performance & Load Testing | — | 🔲 Pending | — |
-| 34 | Security Hardening (SSO/OIDC, TLS, secrets) | — | 🔲 Pending | — |
-| 35 | Production Deployment Package | — | 🔲 Pending | — |
+The [Master Build Prompt](docs/master-build-prompt.md) defines the canonical gate
+sequence. The [source-of-truth guide](docs/source-of-truth.md) defines how
+requirements, source, runtime evidence, and EC2 copies are reconciled. Older
+gate reports retain their original labels; the
+[master gate plan](docs/master-gate-plan.md) contains the numbering crosswalk.
 
-**Current test suite: 334 passing · 93% coverage · ruff clean**
+| Gate | Title | Status |
+|------|-------|--------|
+| 0 | Environment and source-of-truth validation | ✅ Complete |
+| 1 | BRD, SOP, and architecture specification | ✅ Complete |
+| 2 | Repository scaffold and developer foundation | 🟡 Candidate complete on EC2; strict completion awaits CI and merge |
+| 3 | Database and domain model | ✅ Complete |
+| 4 | Security-event simulator | ✅ Complete |
+| 5 | Event ingestion and event queue backend | ✅ Complete |
+| 6 | Evidence-source services | ✅ Complete |
+| 7 | Orchestrate tool layer | ⚠️ Partial — schemas exist; tenant import/live validation outstanding |
+| 8 | Incident history and knowledge retrieval | ⚠️ Partial |
+| 9 | Deterministic risk engine | ✅ Complete |
+| 10 | Confidence engine | ✅ Complete |
+| 11 | Triage Agent | ⚠️ Partial — implementation/tests exist; live Orchestrate validation outstanding |
+| 12 | Context Agent | ⚠️ Partial — implementation/tests exist; live Orchestrate validation outstanding |
+| 13 | Explanation Agent | 🟡 Candidate implementation validated on EC2; live provider integration and strict CI/merge evidence remain outstanding |
+| 14 | Coordinator and end-to-end agent workflow | ⚠️ Partial — backend workflow passes on EC2; live Coordinator import/invocation unverified |
+| 15 | Human-review workflow | ✅ Backend APIs implemented |
+| 16 | Operator dashboard foundation | 🟡 Implementation complete on EC2; strict completion awaits CI and merge |
+| 17–48 | Remaining MVP and production gates | 🔲 Pending |
+
+**Latest EC2 candidate validation:** 537 backend tests passed at 90.39% coverage
+under the production-floor Python 3.11 runtime with greenlet-aware tracing;
+Ruff check and format passed across 114 Python files. Frontend format, type
+check, lint, 14 unit tests, production build, and same-origin container proxy
+smoke test passed. Production dependency audit found zero
+vulnerabilities; six moderate dev-only transitive findings remain in the full
+audit. Fresh and legacy-stamp PostgreSQL migration paths reached Alembic head
+`0004` with 29 public tables. Clean container builds also verified that runtime
+`.env` and key files are excluded from image layers. See
+[Gate 14/16 completion evidence](docs/gate-14-16-completion.md).
+
+**Current focus:** close live Orchestrate Coordinator import/invocation evidence
+for Gate 14, then pass the final CI gate and merge the reviewed candidate before
+marking strict gate completion.
 
 ---
 
-## Live API Surface (Gates 5–13)
+## Current Backend API Surface
 
-| Method | Path | Gate | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/v1/auth/token` | 6 | Login — returns JWT |
-| `POST` | `/api/v1/auth/refresh` | 6 | Rotate access token |
-| `GET` | `/api/v1/auth/me` | 6 | Caller identity |
-| `POST` | `/api/v1/events` | 5 | Ingest a security event |
-| `GET` | `/api/v1/events` | 5 | Paginated event queue (risk-priority ordered) |
-| `GET` | `/api/v1/events/{id}` | 5 | Single event |
-| `PATCH` | `/api/v1/events/{id}/status` | 5 | Lifecycle state transition |
-| `POST` | `/api/v1/events/{id}/assess` | 8 | Run deterministic risk + confidence assessment |
-| `GET` | `/api/v1/events/{id}/assessment` | 9 | Retrieve persisted assessment |
-| `GET` | `/api/v1/events/{id}/assessment/factors` | 9 | Per-factor risk breakdown |
-| `POST` | `/api/v1/events/{id}/decision` | 10 | Record operator decision |
-| `GET` | `/api/v1/events/{id}/decision` | 10 | Latest operator decision |
-| `GET` | `/api/v1/events/{id}/decisions` | 10 | Full decision history |
-| `POST` | `/api/v1/events/{id}/escalation` | 11 | Create escalation record |
-| `GET` | `/api/v1/events/{id}/escalation` | 11 | Latest escalation |
-| `PATCH` | `/api/v1/events/{id}/escalation` | 11 | Acknowledge / resolve / cancel |
-| `GET` | `/api/v1/events/{id}/audit` | 12 | Event-scoped audit trail |
-| `GET` | `/api/v1/audit` | 12 | Global audit trail (filtered, paginated) |
-| `GET` | `/api/v1/risk-policies` | 9 | List risk policy versions |
-| `GET` | `/api/v1/risk-policies/{id}` | 9 | Policy with factor definitions |
-| `GET` | `/api/v1/tools/access-events` | 7 | Access control evidence |
-| `GET` | `/api/v1/tools/schedule` | 7 | Schedule evidence |
-| `GET` | `/api/v1/tools/work-orders` | 7 | Work order evidence |
-| `GET` | `/api/v1/tools/delivery` | 7 | Delivery evidence |
-| `GET` | `/api/v1/tools/location-policy` | 7 | Location policy / security rules |
-| `GET` | `/api/v1/tools/incident-history` | 7 | Prior incident history |
-| `GET` | `/api/v1/tools/integration-health` | 7 | Integration health status |
-| `POST` | `/api/v1/events/{id}/feedback` | 13 | Submit operator feedback |
-| `GET` | `/api/v1/events/{id}/feedback` | 13 | Retrieve all feedback for an event |
-| `GET` | `/health` | 2 | Application health check |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/auth/token` | Login — returns JWT |
+| `POST` | `/api/v1/auth/refresh` | Rotate access token |
+| `POST` | `/api/v1/auth/logout` | Revoke the refresh-token family |
+| `GET` | `/api/v1/auth/me` | Caller identity |
+| `POST` | `/api/v1/events` | Ingest a security event |
+| `GET` | `/api/v1/events` | Paginated event queue (risk-priority ordered) |
+| `GET` | `/api/v1/events/{id}` | Single event |
+| `PATCH` | `/api/v1/events/{id}/status` | Lifecycle state transition |
+| `POST` | `/api/v1/events/{id}/assess` | Run deterministic risk + confidence assessment |
+| `GET` | `/api/v1/events/{id}/assessment` | Retrieve persisted assessment |
+| `GET` | `/api/v1/events/{id}/assessment/factors` | Per-factor risk breakdown |
+| `POST` | `/api/v1/events/{id}/decision` | Record operator decision |
+| `GET` | `/api/v1/events/{id}/decision` | Latest operator decision |
+| `GET` | `/api/v1/events/{id}/decisions` | Full decision history |
+| `POST` | `/api/v1/events/{id}/escalation` | Create escalation record |
+| `GET` | `/api/v1/events/{id}/escalation` | Latest escalation |
+| `PATCH` | `/api/v1/events/{id}/escalation` | Acknowledge / resolve / cancel |
+| `GET` | `/api/v1/events/{id}/audit` | Event-scoped audit trail |
+| `GET` | `/api/v1/audit` | Global audit trail (filtered, paginated) |
+| `GET` | `/api/v1/risk-policies` | List risk policy versions |
+| `GET` | `/api/v1/risk-policies/{id}` | Policy with factor definitions |
+| `GET` | `/api/v1/tools/access-events` | Access control evidence |
+| `GET` | `/api/v1/tools/schedule` | Schedule evidence |
+| `GET` | `/api/v1/tools/work-orders` | Work order evidence |
+| `GET` | `/api/v1/tools/delivery` | Delivery evidence |
+| `GET` | `/api/v1/tools/location-policy` | Location policy / security rules |
+| `GET` | `/api/v1/tools/incident-history` | Prior incident history |
+| `GET` | `/api/v1/tools/integration-health` | Integration health status |
+| `POST` | `/api/v1/events/{id}/feedback` | Submit operator feedback |
+| `GET` | `/api/v1/events/{id}/feedback` | Retrieve all feedback for an event |
+| `GET` | `/health` | Application health check |
 
 ---
 
@@ -108,7 +110,8 @@ sentineliq/
 │       └── ci.yml               # GitHub Actions CI (ruff + pytest --cov-fail-under=85)
 │
 ├── docs/
-│   ├── adr/                     # Architecture Decision Records (ADR-000 to ADR-006)
+│   ├── adr/                     # Architecture Decision Records (ADR-000 to ADR-008)
+│   ├── master-build-prompt.md   # Canonical product and gate specification
 │   ├── master-gate-plan.md      # Gate tracker and progress log
 │   ├── sentinel-brd.md          # Business Requirements Document
 │   ├── sentinel-sop.md          # Standard Operating Procedures
@@ -125,7 +128,9 @@ sentineliq/
 │   ├── gate-9-risk-assessment-api.md
 │   ├── gate-10-operator-decision-api.md
 │   ├── gate-11-escalation-api.md
-│   └── gate-12-audit-trail-api.md
+│   ├── gate-12-audit-trail-api.md
+│   ├── gate-14-triage-agent.md    # Historical roadmap numbering
+│   └── gate-15-context-agent.md   # Historical roadmap numbering
 │
 ├── backend/                     # Python 3.11+ · FastAPI · SQLAlchemy 2
 │   ├── app/
@@ -143,14 +148,14 @@ sentineliq/
 │   │   │                        # work_order, delivery)
 │   │   └── db/                  # session, seed
 │   ├── alembic/                 # Database migrations (1 migration = 26 tables)
-│   └── tests/                   # 313 integration tests (SQLite in-memory)
+│   └── tests/                   # Backend tests (SQLite in-memory)
 │
-├── agents/                      # watsonx Orchestrate agent definitions (Gate 14+)
+├── agents/                      # watsonx Orchestrate agent definitions (Gate 11+)
 ├── workflows/                   # Orchestrate workflow definitions (Gate 14+)
-├── tools/                       # Orchestrate tool implementations (Gate 18+)
-├── data/                        # Seed data + demo scenarios (Gate 20+)
-├── evaluations/                 # Evaluation datasets (Gate 29+)
-├── frontend/                    # React 18 + TypeScript + Vite (Gate 21+)
+├── tools/                       # Orchestrate tool implementations (Gate 7+)
+├── data/                        # Seed data + event scenarios (Gate 4+)
+├── evaluations/                 # Evaluation datasets (Gate 21+)
+├── frontend/                    # React 18 + TypeScript + Vite (Gate 16+)
 │
 └── infra/
     ├── docker/
@@ -197,7 +202,7 @@ curl http://localhost:8000/health
 ```bash
 cd backend
 source .venv/bin/activate
-pytest tests/ -q --tb=short          # 313 tests, ~7 s
+pytest tests/ -q --tb=short          # run backend test suite
 ruff check app/ tests/               # lint
 ruff format --check app/ tests/      # format
 ```
@@ -249,7 +254,7 @@ Every significant system event writes an immutable `AuditEvent` row:
 | `human_decision` | `DecisionService` |
 | `escalated` | `DecisionService` (auto) + `EscalationService` |
 | `status_changed` | `EscalationService` |
-| `feedback_submitted` | `FeedbackService` *(Gate 13)* |
+| `feedback_submitted` | `FeedbackService` *(legacy implementation Gate 13; human-review workflow)* |
 
 ---
 
@@ -259,10 +264,10 @@ Every significant system event writes an immutable `AuditEvent` row:
 |-------|-----------|
 | Backend | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
 | Database | PostgreSQL 15+ with pgvector |
-| Agent Runtime | IBM watsonx Orchestrate *(Gates 14–18)* |
-| Frontend | React 18+, TypeScript, Vite *(Gate 21+)* |
+| Agent Runtime | IBM watsonx Orchestrate *(Gates 11–14)* |
+| Frontend | React 18+, TypeScript, Vite *(Gate 16+)* |
 | Testing (BE) | pytest, pytest-asyncio, httpx, aiosqlite (in-memory) |
-| Testing (FE) | Vitest, React Testing Library, Playwright *(Gate 21+)* |
+| Testing (FE) | Vitest, React Testing Library, Playwright *(Gate 16+)* |
 | Lint / Format | ruff |
 | Containers | Docker, Docker Compose |
 | CI | GitHub Actions — `CI Gate (required for merge)` |

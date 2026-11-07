@@ -96,8 +96,7 @@ async def submit_feedback(
             status_code=400,
             detail=ErrorDetail(
                 code="INVALID_OUTCOME",
-                message=f"Unknown outcome '{body.outcome}'. "
-                f"Valid: {sorted(VALID_OUTCOMES)}",
+                message=f"Unknown outcome '{body.outcome}'. Valid: {sorted(VALID_OUTCOMES)}",
             ).model_dump(),
         )
 
@@ -130,22 +129,26 @@ async def submit_feedback(
     session.add(row)
 
     # Write immutable AuditEvent
-    session.add(AuditEvent(
-        id=str(uuid.uuid4()),
-        event_id=event_id,
-        action="feedback_submitted",
-        actor=actor.email,
-        actor_role=actor_role,
-        occurred_at=submitted_at,
-        details_json=json.dumps({
-            "feedback_id": row.id,
-            "recommendation_useful": body.recommendation_useful,
-            "recommendation_accurate": body.recommendation_accurate,
-            "outcome": body.outcome,
-            "missing_context_provided": body.missing_context is not None,
-            "notes_provided": body.notes is not None,
-        }),
-    ))
+    session.add(
+        AuditEvent(
+            id=str(uuid.uuid4()),
+            event_id=event_id,
+            action="feedback_submitted",
+            actor=actor.email,
+            actor_role=actor_role,
+            occurred_at=submitted_at,
+            details_json=json.dumps(
+                {
+                    "feedback_id": row.id,
+                    "recommendation_useful": body.recommendation_useful,
+                    "recommendation_accurate": body.recommendation_accurate,
+                    "outcome": body.outcome,
+                    "missing_context_provided": body.missing_context is not None,
+                    "notes_provided": body.notes is not None,
+                }
+            ),
+        )
+    )
 
     await session.flush()
 
@@ -197,9 +200,7 @@ async def get_feedback(
         )
 
     stmt = (
-        select(Feedback)
-        .where(Feedback.event_id == event_id)
-        .order_by(Feedback.submitted_at.desc())
+        select(Feedback).where(Feedback.event_id == event_id).order_by(Feedback.submitted_at.desc())
     )
     rows = list((await session.execute(stmt)).scalars().all())
 

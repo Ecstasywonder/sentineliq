@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-VALID_OUTCOMES = frozenset({
-    "confirmed_incident",
-    "false_positive",
-    "authorized_activity",
-    "insufficient_information",
-    "other",
-})
+VALID_OUTCOMES = frozenset(
+    {
+        "confirmed_incident",
+        "false_positive",
+        "authorized_activity",
+        "insufficient_information",
+        "other",
+    }
+)
 
 
 # ---------------------------------------------------------------------------

@@ -279,9 +279,7 @@ class TestWorkOrdersEndpoint:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         await _seed_work_order(db_session)
-        resp = await client.get(
-            f"/api/v1/tools/work-orders?location_id={_LOC}&status=completed"
-        )
+        resp = await client.get(f"/api/v1/tools/work-orders?location_id={_LOC}&status=completed")
         assert resp.status_code == 200
         assert resp.json()["meta"]["record_count"] == 0
 
@@ -409,9 +407,7 @@ class TestIntegrationHealthEndpoint:
             if rec["source_id"].startswith("mock_"):
                 assert rec["status"] == "healthy"
 
-    async def test_persisted_rows_included(
-        self, client: AsyncClient, db_session: AsyncSession
-    ):
+    async def test_persisted_rows_included(self, client: AsyncClient, db_session: AsyncSession):
         await _seed_integration_health(db_session)
         resp = await client.get("/api/v1/tools/integration-health")
         assert resp.status_code == 200

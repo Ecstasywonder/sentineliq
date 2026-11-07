@@ -30,12 +30,14 @@ def _uid() -> str:
 
 
 def _thresholds_json() -> str:
-    return json.dumps({
-        "low":      {"min": 0.0,  "max": 29.0},
-        "medium":   {"min": 30.0, "max": 59.0},
-        "high":     {"min": 60.0, "max": 99.0},
-        "critical": {"min": 100.0, "max": None},
-    })
+    return json.dumps(
+        {
+            "low": {"min": 0.0, "max": 29.0},
+            "medium": {"min": 30.0, "max": 59.0},
+            "high": {"min": 60.0, "max": 99.0},
+            "critical": {"min": 100.0, "max": None},
+        }
+    )
 
 
 async def _seed_policy(
@@ -66,12 +68,19 @@ async def _seed_policy(
 
     for factor_id, label, weight in [
         ("after_hours_access", "After Hours Access", 40.0),
-        ("unverified_person",  "Unverified Person",  50.0),
+        ("unverified_person", "Unverified Person", 50.0),
     ]:
-        session.add(RiskPolicyFactor(
-            id=_uid(), policy_id=policy.id, factor_id=factor_id,
-            label=label, weight=weight, direction="increase", is_active=True,
-        ))
+        session.add(
+            RiskPolicyFactor(
+                id=_uid(),
+                policy_id=policy.id,
+                factor_id=factor_id,
+                label=label,
+                weight=weight,
+                direction="increase",
+                is_active=True,
+            )
+        )
     await session.flush()
     return policy
 
@@ -82,16 +91,12 @@ async def _seed_policy(
 
 
 class TestListRiskPolicies:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_policy(db_session)
         resp = await client.get("/api/v1/risk-policies")
         assert resp.status_code == 200
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_policy(db_session)
         resp = await client.get("/api/v1/risk-policies")
         data = resp.json()
@@ -132,16 +137,12 @@ class TestListRiskPolicies:
 
 
 class TestGetRiskPolicy:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         policy = await _seed_policy(db_session)
         resp = await client.get(f"/api/v1/risk-policies/{policy.id}")
         assert resp.status_code == 200
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         policy = await _seed_policy(db_session)
         resp = await client.get(f"/api/v1/risk-policies/{policy.id}")
         data = resp.json()
@@ -152,18 +153,14 @@ class TestGetRiskPolicy:
         assert isinstance(data["is_active"], bool)
         assert isinstance(data["factors"], list)
 
-    async def test_factors_included(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_factors_included(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """Single policy retrieval must include the factor list."""
         policy = await _seed_policy(db_session)
         resp = await client.get(f"/api/v1/risk-policies/{policy.id}")
         factors = resp.json()["factors"]
         assert len(factors) >= 2
 
-    async def test_factor_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_factor_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """Each factor must have the required fields."""
         policy = await _seed_policy(db_session)
         resp = await client.get(f"/api/v1/risk-policies/{policy.id}")
@@ -183,16 +180,12 @@ class TestGetRiskPolicy:
         weights = [f["weight"] for f in resp.json()["factors"]]
         assert weights == sorted(weights, reverse=True)
 
-    async def test_404_for_unknown_id(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_for_unknown_id(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get(f"/api/v1/risk-policies/{_uid()}")
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "POLICY_NOT_FOUND"
 
-    async def test_is_active_field(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_is_active_field(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """is_active must reflect the DB value."""
         policy = await _seed_policy(db_session, version="2.0-test", is_active=False)
         resp = await client.get(f"/api/v1/risk-policies/{policy.id}")

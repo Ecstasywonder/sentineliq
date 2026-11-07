@@ -3,22 +3,19 @@ name: SentinelIQ CI
 # ---------------------------------------------------------------------------
 # Triggers
 # ---------------------------------------------------------------------------
-# - Every push to any branch runs the full suite (catches gate branches).
+# - Every push runs the full suite, including ad-hoc repair branches.
 # - Every PR targeting main is required to pass before merge.
 # - Merge to main is only allowed via PR — direct pushes are blocked
 #   by the GitHub branch-protection rule documented in docs/deployment.md.
 # ---------------------------------------------------------------------------
 on:
   push:
-    branches:
-      - main
-      - "gate-*"       # all gate-N-* feature branches
-      - "feature/**"
-      - "fix/**"
-      - "hotfix/**"
   pull_request:
-    branches:
-      - main            # every PR into main must pass CI
+    branches: [main]
+
+# Jobs only need repository contents.  Keep the workflow token read-only.
+permissions:
+  contents: read
 
 env:
   PYTHON_VERSION: "3.11"
@@ -76,8 +73,8 @@ jobs:
         env:
           APP_ENV: development
           SECRET_KEY: ci-test-secret-key-not-for-production
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
-          DATABASE_URL_SYNC: sqlite:///:memory:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          DATABASE_URL_SYNC: "sqlite:///:memory:"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -88,7 +85,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Frontend — type-check, lint, unit tests, build
-  # Skipped (with warning) when frontend/ has no package.json yet.
+  # The frontend scaffold is part of the repository and is validated on every run.
   # ---------------------------------------------------------------------------
   frontend:
     name: Frontend (lint + build)
@@ -100,18 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check frontend scaffold exists
-        id: fe_check
-        run: |
-          if [ -f package.json ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "::warning::frontend/package.json not found — skipping frontend CI (Gate 21+)"
-          fi
-
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        if: steps.fe_check.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -119,23 +105,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        if: steps.fe_check.outputs.exists == 'true'
         run: npm ci
 
       - name: Type check
-        if: steps.fe_check.outputs.exists == 'true'
         run: npm run typecheck
 
       - name: Lint
-        if: steps.fe_check.outputs.exists == 'true'
         run: npm run lint
 
       - name: Run unit tests
-        if: steps.fe_check.outputs.exists == 'true'
         run: npm run test:unit
 
       - name: Build
-        if: steps.fe_check.outputs.exists == 'true'
         run: npm run build
 
   # ---------------------------------------------------------------------------
@@ -157,21 +138,21 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Gate guard — aggregate required job
-  # This is the SINGLE job name registered in GitHub branch-protection
-  # "Required status checks".  It only passes when backend passes.
-  # Frontend + security are desirable but not blocking (they have their own
-  # continue-on-error or skip logic).
+  # This is the single status check to register in branch protection. It
+  # represents every configured quality gate, not only the backend job.
   # ---------------------------------------------------------------------------
   ci-gate:
     name: CI Gate (required for merge)
-    needs: [backend]
+    needs: [backend, frontend, security]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check required jobs passed
         run: |
-          if [ "${{ needs.backend.result }}" != "success" ]; then
-            echo "❌ Backend job failed or was cancelled — merge blocked."
+          if [ "${{ needs.backend.result }}" != "success" ] || \
+             [ "${{ needs.frontend.result }}" != "success" ] || \
+             [ "${{ needs.security.result }}" != "success" ]; then
+            echo "One or more required CI jobs failed or were cancelled — merge blocked."
             exit 1
           fi
           echo "✅ All required checks passed — merge allowed."

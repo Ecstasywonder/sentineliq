@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.audit import AuditEvent
 from app.models.event import SecurityEvent
 from app.schemas.assessment import (
     AssessEventRequest,
@@ -44,6 +45,7 @@ from app.schemas.assessment import (
     ConfidenceReductionDetail,
     RiskFactorDetail,
 )
+from app.schemas.context import ContextResultDetail
 from app.schemas.events import (
     VALID_STATUSES,
     ErrorDetail,
@@ -51,7 +53,9 @@ from app.schemas.events import (
     EventListResponse,
     EventResponse,
 )
-from app.security.dependencies import require_permission
+from app.schemas.explanation import ExplanationResultDetail
+from app.schemas.triage import TriageResultDetail
+from app.security.dependencies import AuthenticatedUser, require_permission
 from app.services.assessment_service import AssessmentService
 from app.services.event_lifecycle import InvalidTransitionError, validate_transition
 
@@ -174,7 +178,12 @@ async def ingest_event(
     # ------------------------------------------------------------------
     raw_metadata_json: str | None = None
     if payload.raw_metadata is not None:
-        raw_metadata_json = json.dumps(payload.raw_metadata)
+        raw_metadata_json = json.dumps(
+            payload.raw_metadata,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
 
     normalised_data = json.dumps(
         {
@@ -243,17 +252,50 @@ async def list_events(
         default=None,
         description="Filter by risk level: low | medium | high | critical",
     ),
+    facility_id: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=36,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$",
+        description="Filter by facility ID.",
+    ),
+    location_id: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        description="Filter by location ID.",
+    ),
+    occurred_from: datetime | None = Query(
+        default=None,
+        description="Include events at or after this ISO 8601 timestamp with an offset.",
+    ),
+    occurred_to: datetime | None = Query(
+        default=None,
+        description="Include events at or before this ISO 8601 timestamp with an offset.",
+    ),
+    sort_by: str = Query(
+        default="risk_priority",
+        description="Sort by: risk_priority | event_timestamp | created_at",
+    ),
+    sort_direction: str = Query(
+        default="desc",
+        description="Sort direction: asc | desc. risk_priority desc means critical first.",
+    ),
     page: int = Query(default=1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     session: AsyncSession = Depends(get_db),
 ) -> EventListResponse:
     """
-    Return a paginated list of security events, ordered by risk priority then time.
+    Return a paginated list of security events with allowlisted queue sorting.
 
     - ``status`` filters to a single lifecycle status.
     - ``risk_level`` filters to a single risk level.
-    - Results are ordered: CRITICAL → HIGH → MEDIUM → LOW, then by
-      ``event_timestamp`` descending within each level.
+    - ``facility_id`` and ``location_id`` accept only canonical identifier
+      characters, avoiding ambiguous broad-text matching.
+    - ``occurred_from`` / ``occurred_to`` are offset-aware ISO 8601 bounds.
+    - The default is risk priority (CRITICAL → HIGH → MEDIUM → LOW), then
+      newest event first. All sort fields are explicitly allowlisted.
     """
     # ------------------------------------------------------------------
     # Validate query params
@@ -279,6 +321,44 @@ async def list_events(
             ).model_dump(),
         )
 
+    valid_sort_fields = {"risk_priority", "event_timestamp", "created_at"}
+    if sort_by not in valid_sort_fields:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_SORT_FIELD",
+                message=f"Unknown sort_by '{sort_by}'.",
+                detail=f"Valid fields: {sorted(valid_sort_fields)}",
+            ).model_dump(),
+        )
+    if sort_direction not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_SORT_DIRECTION",
+                message=f"Unknown sort_direction '{sort_direction}'.",
+                detail="Valid directions: ['asc', 'desc']",
+            ).model_dump(),
+        )
+    if (occurred_from is not None and occurred_from.tzinfo is None) or (
+        occurred_to is not None and occurred_to.tzinfo is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_TIME_RANGE",
+                message="Time filters must include a UTC offset.",
+            ).model_dump(),
+        )
+    if occurred_from is not None and occurred_to is not None and occurred_from > occurred_to:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_TIME_RANGE",
+                message="occurred_from must be before or equal to occurred_to.",
+            ).model_dump(),
+        )
+
     # ------------------------------------------------------------------
     # Build query
     # ------------------------------------------------------------------
@@ -291,6 +371,20 @@ async def list_events(
     if risk_level is not None:
         base_stmt = base_stmt.where(SecurityEvent.risk_level == risk_level)
         count_stmt = count_stmt.where(SecurityEvent.risk_level == risk_level)
+    if facility_id is not None:
+        base_stmt = base_stmt.where(SecurityEvent.facility_id == facility_id)
+        count_stmt = count_stmt.where(SecurityEvent.facility_id == facility_id)
+    if location_id is not None:
+        base_stmt = base_stmt.where(SecurityEvent.location_id == location_id)
+        count_stmt = count_stmt.where(SecurityEvent.location_id == location_id)
+    if occurred_from is not None:
+        occurred_from_value = occurred_from.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        base_stmt = base_stmt.where(SecurityEvent.event_timestamp >= occurred_from_value)
+        count_stmt = count_stmt.where(SecurityEvent.event_timestamp >= occurred_from_value)
+    if occurred_to is not None:
+        occurred_to_value = occurred_to.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        base_stmt = base_stmt.where(SecurityEvent.event_timestamp <= occurred_to_value)
+        count_stmt = count_stmt.where(SecurityEvent.event_timestamp <= occurred_to_value)
 
     # Risk-priority ordering (CRITICAL first) using a CASE expression
     # SQLAlchemy text() keeps it simple and db-portable
@@ -304,11 +398,27 @@ async def list_events(
         else_=5,
     )
 
-    base_stmt = (
-        base_stmt.order_by(risk_order, SecurityEvent.event_timestamp.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
+    if sort_by == "risk_priority":
+        # Lower case values represent higher priority. "desc" is presented to
+        # operators as highest priority first, hence the ascending SQL order.
+        priority_order = risk_order.asc() if sort_direction == "desc" else risk_order.desc()
+        tie_breaker = (
+            SecurityEvent.event_timestamp.desc()
+            if sort_direction == "desc"
+            else SecurityEvent.event_timestamp.asc()
+        )
+        ordering = (priority_order, tie_breaker)
+    else:
+        sortable_columns = {
+            "event_timestamp": SecurityEvent.event_timestamp,
+            "created_at": SecurityEvent.created_at,
+        }
+        column = sortable_columns[sort_by]
+        primary_order = column.desc() if sort_direction == "desc" else column.asc()
+        # Deterministic pagination when multiple events share the same value.
+        ordering = (primary_order, SecurityEvent.id.asc())
+
+    base_stmt = base_stmt.order_by(*ordering).offset((page - 1) * page_size).limit(page_size)
 
     # ------------------------------------------------------------------
     # Execute
@@ -337,6 +447,7 @@ async def list_events(
 
 @router.get(
     "/{event_id}",
+    operation_id="get_event_detail",
     response_model=EventResponse,
     summary="Retrieve a single security event",
     dependencies=[Depends(require_permission("events:read"))],
@@ -374,11 +485,21 @@ class StatusTransitionRequest(BaseModel):
     reason: str | None = None
 
 
+_DECISION_ONLY_STATUSES = frozenset(
+    {
+        "awaiting_review",
+        "context_incomplete",
+        "escalated",
+        "closed",
+        "dismissed",
+    }
+)
+
+
 @router.patch(
     "/{event_id}/status",
     response_model=EventResponse,
     summary="Advance event lifecycle status",
-    dependencies=[Depends(require_permission("events:decide"))],
     responses={
         200: {"description": "Status updated"},
         401: {"description": "Not authenticated"},
@@ -392,6 +513,7 @@ async def update_event_status(
     event_id: str,
     body: StatusTransitionRequest,
     session: AsyncSession = Depends(get_db),
+    actor: AuthenticatedUser = Depends(require_permission("events:decide")),
 ) -> EventResponse:
     """
     Advance a security event to a new lifecycle status.
@@ -429,7 +551,38 @@ async def update_event_status(
             ).model_dump(),
         ) from exc
 
+    if body.status in _DECISION_ONLY_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=ErrorDetail(
+                code="DECISION_REQUIRED",
+                message=(
+                    f"Status '{body.status}' is controlled by the assessment, decision, "
+                    "or escalation workflow and cannot be set directly."
+                ),
+            ).model_dump(),
+        )
+
+    prior_status = event.status
     event.status = body.status
+    session.add(
+        AuditEvent(
+            id=_new_id(),
+            event_id=event_id,
+            action="event_status_transitioned",
+            actor=actor.email,
+            actor_role=actor.roles[0] if actor.roles else "unknown",
+            occurred_at=_now_iso(),
+            details_json=json.dumps(
+                {
+                    "prior_status": prior_status,
+                    "target_status": body.status,
+                    "reason": body.reason,
+                    "route": "PATCH /events/{id}/status",
+                }
+            ),
+        )
+    )
     await session.flush()
 
     logger.info(
@@ -556,6 +709,7 @@ async def get_assessment(
     from sqlalchemy import select
 
     from app.models.assessment import ConfidenceAssessment, RiskAssessment
+    from app.models.recommendation import Recommendation
 
     # Verify event exists
     event: SecurityEvent | None = await session.get(SecurityEvent, event_id)
@@ -583,11 +737,13 @@ async def get_assessment(
         )
 
     # Load confidence assessment row
-    conf_stmt = select(ConfidenceAssessment).where(
-        ConfidenceAssessment.event_id == event_id
-    )
+    conf_stmt = select(ConfidenceAssessment).where(ConfidenceAssessment.event_id == event_id)
     conf_result = await session.execute(conf_stmt)
     conf_row: ConfidenceAssessment | None = conf_result.scalar_one_or_none()
+    recommendation_result = await session.execute(
+        select(Recommendation).where(Recommendation.event_id == event_id)
+    )
+    recommendation = recommendation_result.scalar_one_or_none()
 
     # Deserialise stored factor JSON
     risk_factors: list[RiskFactorDetail] = []
@@ -607,6 +763,29 @@ async def get_assessment(
         except (ValueError, KeyError):
             pass
 
+    def _load_snapshot(raw: str | None, schema):
+        if not raw:
+            return None
+        try:
+            return schema(**_json.loads(raw))
+        except (TypeError, ValueError, KeyError):
+            return None
+
+    triage = _load_snapshot(risk_row.triage_result_json, TriageResultDetail)
+    context = _load_snapshot(risk_row.context_result_json, ContextResultDetail)
+    explanation = _load_snapshot(
+        risk_row.explanation_result_json,
+        ExplanationResultDetail,
+    )
+    try:
+        evidence_errors = _json.loads(risk_row.evidence_errors_json or "{}")
+    except (TypeError, ValueError):
+        evidence_errors = {}
+    try:
+        workflow_state = _json.loads(risk_row.workflow_state_json or "{}")
+    except (TypeError, ValueError):
+        workflow_state = {}
+
     return AssessmentRetrievalResponse(
         assessment_id=risk_row.id,
         event_id=event_id,
@@ -614,11 +793,26 @@ async def get_assessment(
         risk_score=risk_row.risk_score,
         risk_level=risk_row.risk_level,
         risk_factors=risk_factors,
-        confidence_score=conf_row.confidence_score if conf_row else risk_row.confidence_score or 0.0,
-        confidence_level=conf_row.confidence_level if conf_row else risk_row.confidence_level or "low",
+        confidence_score=conf_row.confidence_score
+        if conf_row
+        else risk_row.confidence_score or 0.0,
+        confidence_level=conf_row.confidence_level
+        if conf_row
+        else risk_row.confidence_level or "low",
         confidence_reductions=conf_reductions,
         sources_available=conf_row.sources_available if conf_row else 0,
         sources_required=conf_row.sources_required if conf_row else 0,
+        triage=triage,
+        context=context,
+        explanation=explanation,
+        recommendation_id=recommendation.id if recommendation else None,
+        recommendation=(
+            AssessmentService._recommendation_detail(recommendation)
+            if recommendation is not None
+            else None
+        ),
+        evidence_errors=evidence_errors,
+        workflow_state=workflow_state,
         assessed_at=risk_row.assessed_at,
         agent_run_id=risk_row.agent_run_id,
     )

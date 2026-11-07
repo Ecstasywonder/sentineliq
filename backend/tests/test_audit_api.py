@@ -61,12 +61,14 @@ def _uid() -> str:
 
 
 def _thresholds_json() -> str:
-    return json.dumps({
-        "low":      {"min": 0.0,  "max": 29.0},
-        "medium":   {"min": 30.0, "max": 59.0},
-        "high":     {"min": 60.0, "max": 99.0},
-        "critical": {"min": 100.0, "max": None},
-    })
+    return json.dumps(
+        {
+            "low": {"min": 0.0, "max": 29.0},
+            "medium": {"min": 30.0, "max": 59.0},
+            "high": {"min": 60.0, "max": 99.0},
+            "critical": {"min": 100.0, "max": None},
+        }
+    )
 
 
 async def _seed_policy(session: AsyncSession) -> RiskPolicy:
@@ -77,23 +79,33 @@ async def _seed_policy(session: AsyncSession) -> RiskPolicy:
         return existing
 
     policy = RiskPolicy(
-        id=_uid(), version="1.0", name="Default v1.0",
-        is_active=True, thresholds_json=_thresholds_json(),
+        id=_uid(),
+        version="1.0",
+        name="Default v1.0",
+        is_active=True,
+        thresholds_json=_thresholds_json(),
     )
     session.add(policy)
     await session.flush()
     for fid, label, weight in [
         ("after_hours_access", "After Hours Access", 40.0),
-        ("unverified_person",  "Unverified Person",  50.0),
-        ("no_work_order",      "No Work Order",      20.0),
+        ("unverified_person", "Unverified Person", 50.0),
+        ("no_work_order", "No Work Order", 20.0),
         ("no_scheduled_entry", "No Scheduled Entry", 20.0),
         ("known_incident_area", "Known Incident Area", 30.0),
-        ("critical_zone",      "Critical Zone",      40.0),
+        ("critical_zone", "Critical Zone", 40.0),
     ]:
-        session.add(RiskPolicyFactor(
-            id=_uid(), policy_id=policy.id, factor_id=fid,
-            label=label, weight=weight, direction="increase", is_active=True,
-        ))
+        session.add(
+            RiskPolicyFactor(
+                id=_uid(),
+                policy_id=policy.id,
+                factor_id=fid,
+                label=label,
+                weight=weight,
+                direction="increase",
+                is_active=True,
+            )
+        )
     await session.flush()
     return policy
 
@@ -105,10 +117,14 @@ async def _seed_assessed(
     """Seed + assess an event → awaiting_review. Audit rows are created by pipeline."""
     await _seed_policy(session)
     event = SecurityEvent(
-        id=_uid(), provider_event_id=f"prov-{_uid()}",
-        source_adapter="simulator", event_type="person_detected",
+        id=_uid(),
+        provider_event_id=f"prov-{_uid()}",
+        source_adapter="simulator",
+        event_type="person_detected",
         event_timestamp="2026-11-03T22:00:00Z",
-        location_id=_LOC, facility_id=_FAC, status="normalised",
+        location_id=_LOC,
+        facility_id=_FAC,
+        status="normalised",
     )
     session.add(event)
     await session.flush()
@@ -133,12 +149,20 @@ async def _seed_decided(
     return event
 
 
-def _seed_audit_row(session: AsyncSession, event_id: str, action: str, actor: str,
-                    occurred_at: str = "2026-11-03T22:00:00+00:00",
-                    details: dict | None = None) -> AuditEvent:
+def _seed_audit_row(
+    session: AsyncSession,
+    event_id: str,
+    action: str,
+    actor: str,
+    occurred_at: str = "2026-11-03T22:00:00+00:00",
+    details: dict | None = None,
+) -> AuditEvent:
     row = AuditEvent(
-        id=_uid(), event_id=event_id, action=action,
-        actor=actor, occurred_at=occurred_at,
+        id=_uid(),
+        event_id=event_id,
+        action=action,
+        actor=actor,
+        occurred_at=occurred_at,
         details_json=json.dumps(details) if details else None,
     )
     session.add(row)
@@ -151,16 +175,12 @@ def _seed_audit_row(session: AsyncSession, event_id: str, action: str, actor: st
 
 
 class TestGetEventAudit:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_assessed(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/audit")
         assert resp.status_code == 200, resp.text
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_assessed(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/audit")
         data = resp.json()
@@ -171,9 +191,7 @@ class TestGetEventAudit:
         assert "pages" in data
         assert isinstance(data["items"], list)
 
-    async def test_each_entry_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_each_entry_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         event = await _seed_assessed(client, db_session)
         resp = await client.get(f"/api/v1/events/{event.id}/audit")
         for entry in resp.json()["items"]:
@@ -224,9 +242,7 @@ class TestGetEventAudit:
         assert len(data["items"]) <= 2
         assert data["total"] >= 1
 
-    async def test_404_unknown_event(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_404_unknown_event(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get("/api/v1/events/does-not-exist/audit")
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "EVENT_NOT_FOUND"
@@ -235,10 +251,14 @@ class TestGetEventAudit:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         event = SecurityEvent(
-            id=_uid(), provider_event_id=f"prov-{_uid()}",
-            source_adapter="simulator", event_type="motion_detected",
+            id=_uid(),
+            provider_event_id=f"prov-{_uid()}",
+            source_adapter="simulator",
+            event_type="motion_detected",
             event_timestamp="2026-11-03T10:00:00Z",
-            location_id=_LOC, facility_id=_FAC, status="normalised",
+            location_id=_LOC,
+            facility_id=_FAC,
+            status="normalised",
         )
         db_session.add(event)
         await db_session.flush()
@@ -254,9 +274,7 @@ class TestGetEventAudit:
         event = await _seed_decided(client, db_session, "accept")
         resp = await client.get(f"/api/v1/events/{event.id}/audit")
         # Find the human_decision entry which always has details_json
-        decision_entries = [
-            e for e in resp.json()["items"] if e["action"] == "human_decision"
-        ]
+        decision_entries = [e for e in resp.json()["items"] if e["action"] == "human_decision"]
         assert len(decision_entries) > 0
         assert isinstance(decision_entries[0]["details"], dict)
 
@@ -265,7 +283,10 @@ class TestGetEventAudit:
     ) -> None:
         event = await _seed_assessed(client, db_session)
         row = _seed_audit_row(
-            db_session, event.id, "human_decision", "redacted@example.com",
+            db_session,
+            event.id,
+            "human_decision",
+            "redacted@example.com",
             details={"secret": "data"},
         )
         row.redacted = True
@@ -283,48 +304,41 @@ class TestGetEventAudit:
 
 
 class TestGetGlobalAudit:
-    async def test_returns_200(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_200(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_decided(client, db_session, "accept")
         resp = await client.get("/api/v1/audit")
         assert resp.status_code == 200, resp.text
 
-    async def test_response_shape(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_response_shape(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get("/api/v1/audit")
         data = resp.json()
         assert "items" in data
         assert "total" in data
         assert isinstance(data["items"], list)
 
-    async def test_filter_by_action(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_filter_by_action(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_decided(client, db_session, "accept")
         resp = await client.get("/api/v1/audit?action=human_decision")
         assert resp.status_code == 200
         for entry in resp.json()["items"]:
             assert entry["action"] == "human_decision"
 
-    async def test_filter_by_actor(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_filter_by_actor(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_decided(client, db_session, "accept")
         resp = await client.get("/api/v1/audit?actor=test%40sentineliq.test")
         assert resp.status_code == 200
         for entry in resp.json()["items"]:
             assert entry["actor"] == "test@sentineliq.test"
 
-    async def test_filter_by_since(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_filter_by_since(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """Entries before the since timestamp should not appear."""
         event = await _seed_assessed(client, db_session)
         # Plant an old entry
         old_row = _seed_audit_row(
-            db_session, event.id, "status_changed", "old@example.com",
+            db_session,
+            event.id,
+            "status_changed",
+            "old@example.com",
             occurred_at="2020-01-01T00:00:00+00:00",
         )
         await db_session.flush()
@@ -338,14 +352,15 @@ class TestGetGlobalAudit:
         ids = [e["audit_id"] for e in resp.json()["items"]]
         assert old_row.id not in ids
 
-    async def test_filter_by_until(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_filter_by_until(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """Entries after the until timestamp should not appear."""
         event = await _seed_assessed(client, db_session)
         # Plant a future entry
         future_row = _seed_audit_row(
-            db_session, event.id, "status_changed", "future@example.com",
+            db_session,
+            event.id,
+            "status_changed",
+            "future@example.com",
             occurred_at="2099-12-31T23:59:59+00:00",
         )
         await db_session.flush()
@@ -361,9 +376,7 @@ class TestGetGlobalAudit:
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == "INVALID_ACTION"
 
-    async def test_pagination(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_pagination(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """page_size=1 must return exactly 1 item."""
         await _seed_decided(client, db_session, "accept")
         resp = await client.get("/api/v1/audit?page=1&page_size=1")

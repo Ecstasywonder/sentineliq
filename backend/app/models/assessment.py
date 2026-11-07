@@ -34,6 +34,15 @@ class RiskAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     confidence_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     confidence_reductions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Immutable reconstruction bundle for the exact assessment run. These
+    # snapshots keep operator-facing agent output and workflow context auditable
+    # even when an event is later reprocessed or agent definitions change.
+    triage_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    explanation_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_errors_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workflow_state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     assessed_at: Mapped[str] = mapped_column(String(32), nullable=False)
     agent_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 

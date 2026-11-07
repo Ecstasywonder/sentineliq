@@ -6,4 +6,8 @@ environments:
     security_scheme: bearer_token
     type: team
     server_url: __SENTINELIQ_API_BASE_URL__
+  live:
+    security_scheme: bearer_token
+    type: team
+    server_url: __SENTINELIQ_API_BASE_URL__
 

@@ -14,6 +14,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Literal
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 
 import httpx
 
@@ -120,11 +121,13 @@ class OrchestrateClient:
         base_url: str,
         api_key: str,
         timeout: float,
-        api_version: Literal["v2", "v1_5"] = "v2",
+        api_version: Literal["v1"] = "v1",
     ) -> None:
         validated_base_url = validate_orchestrate_base_url(base_url)
         if not api_key:
             raise ValueError("Orchestrate API key is required.")
+        if api_version != "v1":
+            raise ValueError("Orchestrate SaaS direct-agent API version must be v1.")
         self._base_url = validated_base_url
         self._api_key = api_key
         self._timeout = timeout
@@ -138,8 +141,12 @@ class OrchestrateClient:
         input_payload: Mapping[str, Any],
     ) -> tuple[str, list[dict[str, Any]]]:
         """Return assistant text plus a non-sensitive telemetry record."""
-        if not agent_id.strip():
-            raise ValueError("Orchestrate agent ID is required.")
+        try:
+            parsed_agent_id = UUID(agent_id)
+        except (ValueError, AttributeError) as exc:
+            raise ValueError("Orchestrate agent ID must be a deployed agent UUID.") from exc
+        if str(parsed_agent_id) != agent_id:
+            raise ValueError("Orchestrate agent ID must be a canonical deployed agent UUID.")
 
         iam_token = await self._get_iam_token()
         encoded_agent_id = quote(agent_id, safe="")

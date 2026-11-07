@@ -252,17 +252,50 @@ async def list_events(
         default=None,
         description="Filter by risk level: low | medium | high | critical",
     ),
+    facility_id: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=36,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$",
+        description="Filter by facility ID.",
+    ),
+    location_id: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        description="Filter by location ID.",
+    ),
+    occurred_from: datetime | None = Query(
+        default=None,
+        description="Include events at or after this ISO 8601 timestamp with an offset.",
+    ),
+    occurred_to: datetime | None = Query(
+        default=None,
+        description="Include events at or before this ISO 8601 timestamp with an offset.",
+    ),
+    sort_by: str = Query(
+        default="risk_priority",
+        description="Sort by: risk_priority | event_timestamp | created_at",
+    ),
+    sort_direction: str = Query(
+        default="desc",
+        description="Sort direction: asc | desc. risk_priority desc means critical first.",
+    ),
     page: int = Query(default=1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     session: AsyncSession = Depends(get_db),
 ) -> EventListResponse:
     """
-    Return a paginated list of security events, ordered by risk priority then time.
+    Return a paginated list of security events with allowlisted queue sorting.
 
     - ``status`` filters to a single lifecycle status.
     - ``risk_level`` filters to a single risk level.
-    - Results are ordered: CRITICAL → HIGH → MEDIUM → LOW, then by
-      ``event_timestamp`` descending within each level.
+    - ``facility_id`` and ``location_id`` accept only canonical identifier
+      characters, avoiding ambiguous broad-text matching.
+    - ``occurred_from`` / ``occurred_to`` are offset-aware ISO 8601 bounds.
+    - The default is risk priority (CRITICAL → HIGH → MEDIUM → LOW), then
+      newest event first. All sort fields are explicitly allowlisted.
     """
     # ------------------------------------------------------------------
     # Validate query params
@@ -288,6 +321,44 @@ async def list_events(
             ).model_dump(),
         )
 
+    valid_sort_fields = {"risk_priority", "event_timestamp", "created_at"}
+    if sort_by not in valid_sort_fields:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_SORT_FIELD",
+                message=f"Unknown sort_by '{sort_by}'.",
+                detail=f"Valid fields: {sorted(valid_sort_fields)}",
+            ).model_dump(),
+        )
+    if sort_direction not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_SORT_DIRECTION",
+                message=f"Unknown sort_direction '{sort_direction}'.",
+                detail="Valid directions: ['asc', 'desc']",
+            ).model_dump(),
+        )
+    if (occurred_from is not None and occurred_from.tzinfo is None) or (
+        occurred_to is not None and occurred_to.tzinfo is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_TIME_RANGE",
+                message="Time filters must include a UTC offset.",
+            ).model_dump(),
+        )
+    if occurred_from is not None and occurred_to is not None and occurred_from > occurred_to:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code="INVALID_TIME_RANGE",
+                message="occurred_from must be before or equal to occurred_to.",
+            ).model_dump(),
+        )
+
     # ------------------------------------------------------------------
     # Build query
     # ------------------------------------------------------------------
@@ -300,6 +371,20 @@ async def list_events(
     if risk_level is not None:
         base_stmt = base_stmt.where(SecurityEvent.risk_level == risk_level)
         count_stmt = count_stmt.where(SecurityEvent.risk_level == risk_level)
+    if facility_id is not None:
+        base_stmt = base_stmt.where(SecurityEvent.facility_id == facility_id)
+        count_stmt = count_stmt.where(SecurityEvent.facility_id == facility_id)
+    if location_id is not None:
+        base_stmt = base_stmt.where(SecurityEvent.location_id == location_id)
+        count_stmt = count_stmt.where(SecurityEvent.location_id == location_id)
+    if occurred_from is not None:
+        occurred_from_value = occurred_from.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        base_stmt = base_stmt.where(SecurityEvent.event_timestamp >= occurred_from_value)
+        count_stmt = count_stmt.where(SecurityEvent.event_timestamp >= occurred_from_value)
+    if occurred_to is not None:
+        occurred_to_value = occurred_to.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        base_stmt = base_stmt.where(SecurityEvent.event_timestamp <= occurred_to_value)
+        count_stmt = count_stmt.where(SecurityEvent.event_timestamp <= occurred_to_value)
 
     # Risk-priority ordering (CRITICAL first) using a CASE expression
     # SQLAlchemy text() keeps it simple and db-portable
@@ -313,11 +398,27 @@ async def list_events(
         else_=5,
     )
 
-    base_stmt = (
-        base_stmt.order_by(risk_order, SecurityEvent.event_timestamp.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
+    if sort_by == "risk_priority":
+        # Lower case values represent higher priority. "desc" is presented to
+        # operators as highest priority first, hence the ascending SQL order.
+        priority_order = risk_order.asc() if sort_direction == "desc" else risk_order.desc()
+        tie_breaker = (
+            SecurityEvent.event_timestamp.desc()
+            if sort_direction == "desc"
+            else SecurityEvent.event_timestamp.asc()
+        )
+        ordering = (priority_order, tie_breaker)
+    else:
+        sortable_columns = {
+            "event_timestamp": SecurityEvent.event_timestamp,
+            "created_at": SecurityEvent.created_at,
+        }
+        column = sortable_columns[sort_by]
+        primary_order = column.desc() if sort_direction == "desc" else column.asc()
+        # Deterministic pagination when multiple events share the same value.
+        ordering = (primary_order, SecurityEvent.id.asc())
+
+    base_stmt = base_stmt.order_by(*ordering).offset((page - 1) * page_size).limit(page_size)
 
     # ------------------------------------------------------------------
     # Execute

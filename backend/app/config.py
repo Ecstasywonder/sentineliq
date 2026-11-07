@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Literal
+from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -66,12 +67,15 @@ class Settings(BaseSettings):
     # Leave empty to fall through to Path A (watsonx.ai direct).
     orchestrate_url: str = ""
     orchestrate_api_key: str = ""
-    orchestrate_api_version: Literal["v2", "v1_5"] = "v2"
-    # Agent IDs as imported into Orchestrate (set after `orchestrate agents import`)
-    orchestrate_triage_agent_id: str = "sentinel_triage_agent"
-    orchestrate_context_agent_id: str = "sentinel_context_agent"
-    orchestrate_explanation_agent_id: str = "sentinel_explanation_agent"
-    orchestrate_coordinator_agent_id: str = "sentinel_coordinator"
+    # The current SaaS direct-agent runtime contract, verified against a live
+    # tenant. Older v2/v1_5 paths are not interchangeable with this endpoint.
+    orchestrate_api_version: Literal["v1"] = "v1"
+    # Deployment UUIDs assigned by Orchestrate after agents are imported and
+    # deployed. Display names are not accepted by the SaaS runtime endpoint.
+    orchestrate_triage_agent_id: str = ""
+    orchestrate_context_agent_id: str = ""
+    orchestrate_explanation_agent_id: str = ""
+    orchestrate_coordinator_agent_id: str = ""
 
     # -------------------------------------------------------------------------
     # IBM watsonx.ai (Path A — verified fallback)
@@ -223,14 +227,39 @@ class Settings(BaseSettings):
     event_source_adapter: str = "simulator"
 
     @model_validator(mode="after")
-    def reject_insecure_production_configuration(self) -> Settings:
-        """Prevent the application from starting with known unsafe production defaults.
+    def reject_invalid_configuration(self) -> Settings:
+        """Prevent startup with an invalid runtime or unsafe production configuration.
 
-        Development intentionally remains frictionless, but a production process
-        must receive explicitly managed credentials and an explicit browser
-        allow-list.  Failing during settings construction keeps an unhealthy
+        A configured Orchestrate path requires deployed agent UUIDs in every
+        environment. Development otherwise remains frictionless, but a production
+        process must receive explicitly managed credentials and an explicit browser
+        allow-list. Failing during settings construction keeps an unhealthy
         deployment from appearing ready.
         """
+        # A partially configured Path B must fail at startup instead of making
+        # every agent request fall through after a tenant-name/UUID 404.
+        if self.orchestrate_url and self.effective_orchestrate_api_key:
+            agent_ids = {
+                "ORCHESTRATE_TRIAGE_AGENT_ID": self.orchestrate_triage_agent_id,
+                "ORCHESTRATE_CONTEXT_AGENT_ID": self.orchestrate_context_agent_id,
+                "ORCHESTRATE_EXPLANATION_AGENT_ID": self.orchestrate_explanation_agent_id,
+                "ORCHESTRATE_COORDINATOR_AGENT_ID": self.orchestrate_coordinator_agent_id,
+            }
+            invalid_agent_ids: list[str] = []
+            for field_name, value in agent_ids.items():
+                try:
+                    parsed = UUID(value)
+                except (ValueError, AttributeError):
+                    invalid_agent_ids.append(field_name)
+                    continue
+                if str(parsed) != value:
+                    invalid_agent_ids.append(field_name)
+            if invalid_agent_ids:
+                raise ValueError(
+                    "Invalid Orchestrate configuration: deployed agent UUIDs are required for "
+                    + ", ".join(invalid_agent_ids)
+                )
+
         if self.app_env != "production":
             return self
 

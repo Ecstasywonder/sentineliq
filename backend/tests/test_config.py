@@ -59,9 +59,46 @@ def test_orchestrate_prefers_dedicated_iam_key() -> None:
     assert settings.effective_orchestrate_api_key == "orchestrate-key"
 
 
-def test_orchestrate_api_version_is_restricted_to_documented_versions() -> None:
+def test_orchestrate_api_version_rejects_legacy_contract() -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, app_env="development", orchestrate_api_version="v1")
+        Settings(_env_file=None, app_env="development", orchestrate_api_version="v2")
+
+
+def test_orchestrate_defaults_to_live_verified_v1_contract() -> None:
+    settings = Settings(_env_file=None, app_env="development")
+    assert settings.orchestrate_api_version == "v1"
+
+
+def test_orchestrate_active_requires_deployed_agent_uuids() -> None:
+    with pytest.raises(ValidationError, match="deployed agent UUIDs are required"):
+        Settings(
+            _env_file=None,
+            app_env="development",
+            orchestrate_url=(
+                "https://us-south.watson-orchestrate.cloud.ibm.com/instances/instance-123"
+            ),
+            orchestrate_api_key="secret",
+            orchestrate_triage_agent_id="sentinel_triage_agent",
+            orchestrate_context_agent_id="sentinel_context_agent",
+            orchestrate_explanation_agent_id="sentinel_explanation_agent",
+            orchestrate_coordinator_agent_id="sentinel_coordinator",
+        )
+
+
+def test_orchestrate_configuration_accepts_environment_agent_uuids() -> None:
+    settings = Settings(
+        _env_file=None,
+        app_env="development",
+        orchestrate_url=(
+            "https://us-south.watson-orchestrate.cloud.ibm.com/instances/instance-123"
+        ),
+        orchestrate_api_key="secret",
+        orchestrate_triage_agent_id="11111111-1111-4111-8111-111111111111",
+        orchestrate_context_agent_id="22222222-2222-4222-8222-222222222222",
+        orchestrate_explanation_agent_id="33333333-3333-4333-8333-333333333333",
+        orchestrate_coordinator_agent_id="44444444-4444-4444-8444-444444444444",
+    )
+    assert settings.orchestrate_triage_agent_id == "11111111-1111-4111-8111-111111111111"
 
 
 def test_watsonx_base_url_prefers_primary_setting() -> None:

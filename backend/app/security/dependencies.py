@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.user import Role, User, UserRole
-from app.security.rbac import has_permission
+from app.security.rbac import has_permission, service_purpose_allows
 from app.security.tokens import TokenError, decode_access_token
 
 logger = structlog.get_logger(__name__)
@@ -35,13 +35,14 @@ _bearer = HTTPBearer(auto_error=True)
 class AuthenticatedUser:
     """Lightweight identity object attached to each authenticated request."""
 
-    def __init__(self, user: User, roles: list[str]) -> None:
+    def __init__(self, user: User, roles: list[str], service_purpose: str | None = None) -> None:
         self.user = user
         self.id = user.id
         self.email = user.email
         self.full_name = user.full_name
         self.roles = roles
         self.is_active = user.is_active
+        self.service_purpose = service_purpose
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +79,12 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
 
+    token_purpose = payload.get("purpose")
+    if token_purpose != user.service_purpose:
+        # A machine identity can never use a legacy human token, and a service
+        # token cannot be rebound to an interactive user.
+        raise credentials_exception
+
     # Load roles
     stmt = (
         select(Role.name)
@@ -87,11 +94,23 @@ async def get_current_user(
     result = await session.execute(stmt)
     roles: list[str] = list(result.scalars().all())
 
-    return AuthenticatedUser(user=user, roles=roles)
+    return AuthenticatedUser(user=user, roles=roles, service_purpose=token_purpose)
+
+
+async def get_current_human_user(
+    auth: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    """Reject purpose-bound service tokens on explicitly human endpoints."""
+    if auth.service_purpose is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "HUMAN_TOKEN_REQUIRED", "message": "Interactive user token required."},
+        )
+    return auth
 
 
 # Convenience type alias for route signatures
-CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
+CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_human_user)]
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +129,16 @@ def require_permission(permission: str):
     """
 
     async def _guard(auth: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
+        if auth.service_purpose is not None and not service_purpose_allows(
+            auth.service_purpose, auth.roles, permission
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "SERVICE_PURPOSE_FORBIDDEN",
+                    "message": "Service token purpose does not permit this operation.",
+                },
+            )
         if not has_permission(auth.roles, permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

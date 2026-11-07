@@ -20,9 +20,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from jose import JWTError, jwt
+import jwt
 
 from app.config import get_settings
+
+SERVICE_TOKEN_AUDIENCE = "sentineliq-service"
+SERVICE_TOKEN_PURPOSES = frozenset({"orchestrate_tools", "event_ingestion"})
 
 
 class TokenError(ValueError):
@@ -41,6 +44,23 @@ def create_access_token(user_id: str, roles: list[str]) -> str:
         "sub": user_id,
         "roles": roles,
         "type": "access",
+        "exp": expire,
+    }
+    return jwt.encode(payload, s.secret_key, algorithm=s.algorithm)
+
+
+def create_service_access_token(user_id: str, roles: list[str], purpose: str) -> str:
+    """Issue an audience- and purpose-bound access token for a machine identity."""
+    if purpose not in SERVICE_TOKEN_PURPOSES:
+        raise ValueError(f"Unknown service token purpose: {purpose}")
+    s = _settings()
+    expire = datetime.now(UTC) + timedelta(minutes=s.access_token_expire_minutes)
+    payload = {
+        "sub": user_id,
+        "roles": roles,
+        "type": "access",
+        "aud": SERVICE_TOKEN_AUDIENCE,
+        "purpose": purpose,
         "exp": expire,
     }
     return jwt.encode(payload, s.secret_key, algorithm=s.algorithm)
@@ -106,12 +126,25 @@ def decode_access_token(token: str) -> dict:
     """
     s = _settings()
     try:
-        payload = jwt.decode(token, s.secret_key, algorithms=[s.algorithm])
-    except JWTError as exc:
+        # Human tokens predate the audience claim. Decode without implicit
+        # audience validation, then validate the service claim pair explicitly.
+        payload = jwt.decode(
+            token,
+            s.secret_key,
+            algorithms=[s.algorithm],
+            options={"verify_aud": False},
+        )
+    except jwt.PyJWTError as exc:
         raise TokenError(f"Invalid token: {exc}") from exc
 
     if payload.get("type") != "access":
         raise TokenError("Token is not an access token.")
+    audience = payload.get("aud")
+    purpose = payload.get("purpose")
+    if audience is None and purpose is None:
+        return payload
+    if audience != SERVICE_TOKEN_AUDIENCE or purpose not in SERVICE_TOKEN_PURPOSES:
+        raise TokenError("Invalid service token audience or purpose.")
     return payload
 
 
@@ -125,7 +158,7 @@ def decode_refresh_token_claims(token: str) -> RefreshTokenClaims:
     s = _settings()
     try:
         payload = jwt.decode(token, s.secret_key, algorithms=[s.algorithm])
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise TokenError(f"Invalid refresh token: {exc}") from exc
 
     if payload.get("type") != "refresh":

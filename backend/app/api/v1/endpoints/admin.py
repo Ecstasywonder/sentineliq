@@ -14,7 +14,9 @@ Routes (all require admin:users permission):
 
 from __future__ import annotations
 
+import json
 import math
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,7 +24,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.user import VALID_ROLES, Role, User, UserRole
+from app.models.audit import AuditEvent
+from app.models.user import HUMAN_ROLES, SERVICE_ROLES, VALID_ROLES, Role, User, UserRole
 from app.schemas.admin import (
     RoleAssignRequest,
     RoleDescription,
@@ -34,9 +37,9 @@ from app.schemas.admin import (
     UserRoleSummary,
     UserUpdateRequest,
 )
-from app.security.dependencies import require_permission
+from app.security.dependencies import AuthenticatedUser, require_permission
 from app.security.passwords import hash_password
-from app.security.rbac import _ROLE_PERMISSIONS
+from app.security.rbac import _ROLE_PERMISSIONS, has_permission
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -75,6 +78,60 @@ async def _role_names_for_user(session: AsyncSession, user_id: str) -> list[str]
 
 def _format_ts(ts) -> str:  # type: ignore[type-arg]
     return ts.isoformat() if ts else ""
+
+
+def _append_admin_audit(
+    session: AsyncSession,
+    *,
+    action: str,
+    actor: AuthenticatedUser,
+    target: User,
+    details: dict,
+) -> None:
+    """Stage an admin audit row in the caller's mutation transaction."""
+    authorizing_role = next(
+        (role for role in sorted(actor.roles) if has_permission([role], "admin:users")),
+        None,
+    )
+    session.add(
+        AuditEvent(
+            action=action,
+            actor=actor.email,
+            actor_role=authorizing_role,
+            occurred_at=datetime.now(UTC).isoformat(),
+            details_json=json.dumps({"target_user_id": target.id, **details}, sort_keys=True),
+        )
+    )
+
+
+async def _commit_admin_transaction(session: AsyncSession) -> None:
+    """Commit mutation and audit atomically, returning the session to a usable state on failure."""
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+
+async def _flush_admin_transaction(session: AsyncSession) -> None:
+    """Flush safely when an identifier is needed before the audit row is staged."""
+    try:
+        await session.flush()
+    except Exception:
+        await session.rollback()
+        raise
+
+
+def _reject_service_role_assignment(role_names: list[str]) -> None:
+    requested_service_roles = sorted(set(role_names).intersection(SERVICE_ROLES))
+    if requested_service_roles:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "SERVICE_ROLE_PROVISIONING_REQUIRED",
+                "message": "Service roles require the dedicated service-identity provisioner.",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -134,13 +191,13 @@ async def list_users(
 @router.post(
     "/users",
     response_model=UserDetailResponse,
-    dependencies=[_ADMIN_DEP],
     status_code=status.HTTP_201_CREATED,
     summary="Create a new user",
 )
 async def create_user(
     body: UserCreateRequest,
     session: AsyncSession = Depends(get_db),
+    actor: AuthenticatedUser = _ADMIN_DEP,
 ) -> UserDetailResponse:
     # Email uniqueness check
     existing = await session.execute(select(User).where(User.email == body.email.lower()))
@@ -151,14 +208,15 @@ async def create_user(
         )
 
     # Validate requested roles
-    invalid_roles = [r for r in body.roles if r not in VALID_ROLES]
+    _reject_service_role_assignment(body.roles)
+    invalid_roles = [r for r in body.roles if r not in HUMAN_ROLES]
     if invalid_roles:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "code": "INVALID_ROLE",
                 "message": f"Unknown role(s): {', '.join(invalid_roles)}. "
-                f"Valid roles: {', '.join(VALID_ROLES)}",
+                f"Valid roles: {', '.join(HUMAN_ROLES)}",
             },
         )
 
@@ -170,17 +228,31 @@ async def create_user(
         is_verified=False,
     )
     session.add(user)
-    await session.flush()  # get user.id
+    await _flush_admin_transaction(session)  # get user.id
 
     assigned: list[UserRoleSummary] = []
     for role_name in body.roles:
         role_result = await session.execute(select(Role).where(Role.name == role_name))
         role = role_result.scalar_one_or_none()
         if role:
-            session.add(UserRole(user_id=user.id, role_id=role.id))
-            assigned.append(UserRoleSummary(role=role_name, granted_by=None))
+            session.add(UserRole(user_id=user.id, role_id=role.id, granted_by=actor.id))
+            assigned.append(UserRoleSummary(role=role_name, granted_by=actor.id))
+            _append_admin_audit(
+                session,
+                action="admin_role_granted",
+                actor=actor,
+                target=user,
+                details={"role": role_name, "during_user_creation": True},
+            )
 
-    await session.commit()
+    _append_admin_audit(
+        session,
+        action="admin_user_created",
+        actor=actor,
+        target=user,
+        details={"roles": sorted(body.roles)},
+    )
+    await _commit_admin_transaction(session)
     logger.info("admin.user_created", user_id=user.id, email=user.email, roles=body.roles)
 
     return UserDetailResponse(
@@ -237,22 +309,44 @@ async def get_user(
 @router.patch(
     "/users/{user_id}",
     response_model=UserDetailResponse,
-    dependencies=[_ADMIN_DEP],
     summary="Update user full_name or is_active",
 )
 async def update_user(
     user_id: str,
     body: UserUpdateRequest,
     session: AsyncSession = Depends(get_db),
+    actor: AuthenticatedUser = _ADMIN_DEP,
 ) -> UserDetailResponse:
     user = await _load_user_or_404(session, user_id)
 
+    prior_full_name = user.full_name
+    prior_is_active = user.is_active
     if body.full_name is not None:
         user.full_name = body.full_name
     if body.is_active is not None:
         user.is_active = body.is_active
 
-    await session.commit()
+    if user.full_name != prior_full_name:
+        _append_admin_audit(
+            session,
+            action="admin_user_updated",
+            actor=actor,
+            target=user,
+            details={"changes": {"full_name": {"from": prior_full_name, "to": user.full_name}}},
+        )
+    if user.is_active != prior_is_active:
+        _append_admin_audit(
+            session,
+            action=(
+                "admin_user_deactivated"
+                if prior_is_active and not user.is_active
+                else "admin_user_updated"
+            ),
+            actor=actor,
+            target=user,
+            details={"changes": {"is_active": {"from": prior_is_active, "to": user.is_active}}},
+        )
+    await _commit_admin_transaction(session)
     logger.info("admin.user_updated", user_id=user_id)
 
     user_roles = await _roles_for_user(session, user_id)
@@ -281,7 +375,6 @@ async def update_user(
 @router.post(
     "/users/{user_id}/roles",
     response_model=UserDetailResponse,
-    dependencies=[_ADMIN_DEP],
     status_code=status.HTTP_200_OK,
     summary="Assign a role to a user",
 )
@@ -289,7 +382,9 @@ async def assign_role(
     user_id: str,
     body: RoleAssignRequest,
     session: AsyncSession = Depends(get_db),
+    actor: AuthenticatedUser = _ADMIN_DEP,
 ) -> UserDetailResponse:
+    _reject_service_role_assignment([body.role])
     if body.role not in VALID_ROLES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -317,8 +412,15 @@ async def assign_role(
         )
     )
     if existing.scalar_one_or_none() is None:
-        session.add(UserRole(user_id=user_id, role_id=role.id))
-        await session.commit()
+        session.add(UserRole(user_id=user_id, role_id=role.id, granted_by=actor.id))
+        _append_admin_audit(
+            session,
+            action="admin_role_granted",
+            actor=actor,
+            target=user,
+            details={"role": body.role},
+        )
+        await _commit_admin_transaction(session)
         logger.info("admin.role_assigned", user_id=user_id, role=body.role)
 
     user_roles = await _roles_for_user(session, user_id)
@@ -347,14 +449,15 @@ async def assign_role(
 @router.delete(
     "/users/{user_id}/roles/{role}",
     response_model=UserDetailResponse,
-    dependencies=[_ADMIN_DEP],
     summary="Remove a role from a user",
 )
 async def remove_role(
     user_id: str,
     role: str,
     session: AsyncSession = Depends(get_db),
+    actor: AuthenticatedUser = _ADMIN_DEP,
 ) -> UserDetailResponse:
+    _reject_service_role_assignment([role])
     user = await _load_user_or_404(session, user_id)
 
     role_result = await session.execute(select(Role).where(Role.name == role))
@@ -374,7 +477,14 @@ async def remove_role(
     ur = ur_result.scalar_one_or_none()
     if ur is not None:
         await session.delete(ur)
-        await session.commit()
+        _append_admin_audit(
+            session,
+            action="admin_role_removed",
+            actor=actor,
+            target=user,
+            details={"role": role},
+        )
+        await _commit_admin_transaction(session)
         logger.info("admin.role_removed", user_id=user_id, role=role)
 
     user_roles = await _roles_for_user(session, user_id)
@@ -420,6 +530,8 @@ async def list_roles() -> RolesResponse:
         "audit_reviewer": "Compliance/Audit Reviewer — read-only access to decisions and audit trail",
         "platform_admin": "Platform Administrator — full access including user and role management",
         "agent_admin": "AI/Agent Administrator — manages agent configuration and model settings",
+        "agent_tool_reader": "Machine identity — read-only access to Orchestrate context tools",
+        "event_ingestor": "Machine identity — event ingestion only",
     }
 
     roles = [

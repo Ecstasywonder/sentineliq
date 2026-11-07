@@ -21,10 +21,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

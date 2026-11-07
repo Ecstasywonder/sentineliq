@@ -15,6 +15,7 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
+from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
 from app.models import (  # noqa: F401 — ensure all models registered
@@ -54,6 +55,8 @@ ROLES = [
     {"name": "audit_reviewer", "description": "Compliance / Audit Reviewer"},
     {"name": "platform_admin", "description": "Platform Administrator"},
     {"name": "agent_admin", "description": "AI / Agent Administrator"},
+    {"name": "agent_tool_reader", "description": "Orchestrate read-only tool identity"},
+    {"name": "event_ingestor", "description": "Event ingestion service identity"},
 ]
 
 FACILITY = {
@@ -349,9 +352,11 @@ async def seed() -> None:
     async with AsyncSessionLocal() as session:
         # Roles
         for r in ROLES:
-            await session.get(Role, r["name"])
-            role = Role(id=_id(), **r)
-            session.add(role)
+            existing = await session.scalar(select(Role).where(Role.name == r["name"]))
+            if existing is None:
+                session.add(Role(id=_id(), **r))
+            else:
+                existing.description = r["description"]
         await session.commit()
         logger.info("seed.roles_done")
 

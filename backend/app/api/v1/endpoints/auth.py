@@ -100,6 +100,14 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "ACCOUNT_DISABLED", "message": "Account is disabled."},
         )
+    if user.service_purpose is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "SERVICE_ACCOUNT_LOGIN_DISABLED",
+                "message": "Service identities cannot use password login.",
+            },
+        )
 
     roles = await _load_user_roles(session, user.id)
     s = get_settings()
@@ -202,7 +210,7 @@ async def refresh(
         raise _401
 
     user: User | None = await session.get(User, claims.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.service_purpose is not None:
         family.revoked_at = now
         await session.execute(
             update(RefreshToken)

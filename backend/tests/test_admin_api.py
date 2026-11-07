@@ -19,10 +19,12 @@ import uuid
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
+from app.models.audit import AuditEvent
 from app.models.user import VALID_ROLES, Role, User, UserRole
 from app.security.dependencies import AuthenticatedUser, get_current_user
 from app.security.passwords import hash_password
@@ -245,6 +247,22 @@ async def test_create_user_happy_path(
     role_names = [r["role"] for r in body["roles"]]
     assert "officer" in role_names
 
+    created = await db_session.scalar(select(User).where(User.email == email))
+    assert created is not None
+    user_role = await db_session.scalar(select(UserRole).where(UserRole.user_id == created.id))
+    assert user_role is not None
+    assert user_role.granted_by is not None
+
+    audit = await db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.action == "admin_user_created")
+        .where(AuditEvent.actor.like("stub_%@test.com"))
+        .order_by(AuditEvent.occurred_at.desc())
+    )
+    assert audit is not None
+    assert audit.actor_role == "platform_admin"
+    assert created.id in (audit.details_json or "")
+
 
 @pytest.mark.asyncio
 async def test_create_user_duplicate_email_returns_409(
@@ -293,6 +311,54 @@ async def test_create_user_no_roles(
     )
     assert resp.status_code == 201
     assert resp.json()["roles"] == []
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_assign_service_role_through_human_user_api(
+    admin_client: AsyncClient,
+) -> None:
+    resp = await admin_client.post(
+        "/api/v1/admin/users",
+        json={
+            "email": f"service_{_id()[:8]}@test.com",
+            "full_name": "Not a service provisioner",
+            "password": "password123",
+            "roles": ["agent_tool_reader"],
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "SERVICE_ROLE_PROVISIONING_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_user_create_rolls_back_when_audit_insert_fails(
+    admin_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    email = f"rollback_{_id()[:8]}@test.com"
+
+    def reject_admin_audit(session, flush_context, instances) -> None:
+        if any(
+            isinstance(obj, AuditEvent) and obj.action == "admin_user_created"
+            for obj in session.new
+        ):
+            raise RuntimeError("simulated audit persistence failure")
+
+    event.listen(db_session.sync_session, "before_flush", reject_admin_audit)
+    try:
+        with pytest.raises(RuntimeError, match="audit persistence failure"):
+            await admin_client.post(
+                "/api/v1/admin/users",
+                json={
+                    "email": email,
+                    "full_name": "Must Roll Back",
+                    "password": "password123",
+                },
+            )
+    finally:
+        event.remove(db_session.sync_session, "before_flush", reject_admin_audit)
+
+    assert await db_session.scalar(select(User).where(User.email == email)) is None
 
 
 # ===========================================================================
@@ -345,6 +411,12 @@ async def test_deactivate_user(
     )
     assert resp.status_code == 200
     assert resp.json()["is_active"] is False
+    audit = await db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.action == "admin_user_deactivated")
+        .where(AuditEvent.details_json.contains(user.id))
+    )
+    assert audit is not None
 
 
 @pytest.mark.asyncio
@@ -361,6 +433,12 @@ async def test_rename_user(
     )
     assert resp.status_code == 200
     assert resp.json()["full_name"] == "Updated Name"
+    audit = await db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.action == "admin_user_updated")
+        .where(AuditEvent.details_json.contains(user.id))
+    )
+    assert audit is not None
 
 
 @pytest.mark.asyncio
@@ -395,6 +473,22 @@ async def test_assign_role_happy_path(
     assert resp.status_code == 200
     role_names = [r["role"] for r in resp.json()["roles"]]
     assert "supervisor" in role_names
+    supervisor = await db_session.scalar(select(Role).where(Role.name == "supervisor"))
+    assert supervisor is not None
+    assignment = await db_session.scalar(
+        select(UserRole).where(
+            UserRole.user_id == user.id,
+            UserRole.role_id == supervisor.id,
+        )
+    )
+    assert assignment is not None
+    assert assignment.granted_by is not None
+    audit = await db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.action == "admin_role_granted")
+        .where(AuditEvent.details_json.contains(user.id))
+    )
+    assert audit is not None
 
 
 @pytest.mark.asyncio
@@ -461,6 +555,12 @@ async def test_remove_role_happy_path(
     assert resp.status_code == 200
     role_names = [r["role"] for r in resp.json()["roles"]]
     assert "officer" not in role_names
+    audit = await db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.action == "admin_role_removed")
+        .where(AuditEvent.details_json.contains(user.id))
+    )
+    assert audit is not None
 
 
 @pytest.mark.asyncio

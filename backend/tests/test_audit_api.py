@@ -323,6 +323,23 @@ class TestGetGlobalAudit:
         for entry in resp.json()["items"]:
             assert entry["action"] == "human_decision"
 
+    async def test_event_status_transition_action_is_queryable(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        event = await _seed_assessed(client, db_session)
+        row = _seed_audit_row(
+            db_session,
+            event.id,
+            "event_status_transitioned",
+            "operator@example.com",
+        )
+        await db_session.flush()
+
+        resp = await client.get("/api/v1/audit?action=event_status_transitioned")
+
+        assert resp.status_code == 200
+        assert row.id in {item["audit_id"] for item in resp.json()["items"]}
+
     async def test_filter_by_actor(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_decided(client, db_session, "accept")
         resp = await client.get("/api/v1/audit?actor=test%40sentineliq.test")

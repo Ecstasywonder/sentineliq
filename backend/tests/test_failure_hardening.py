@@ -32,9 +32,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import AccessEvent
-from app.models.event import SecurityEvent
 from app.models.integration import IntegrationHealth
-from app.models.security_rule import SecurityRule
 from app.schemas.triage import TriageResult
 from app.services.confidence_engine import ConfidenceEngine, SourceStatus
 from app.services.evidence_aggregator import EvidenceAggregator

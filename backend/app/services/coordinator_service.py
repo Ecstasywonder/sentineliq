@@ -111,7 +111,7 @@ class CoordinatorService:
             source = result.source
             status = "success"
             error_message = None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "coordinator_service.all_paths_failed",
                 event_id=event_id,
@@ -151,7 +151,7 @@ class CoordinatorService:
         if settings.orchestrate_active and settings.orchestrate_coordinator_agent_id:
             try:
                 return await self._invoke_orchestrate(event_id, run_id)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "coordinator_service.orchestrate_failed",
                     event_id=event_id,

@@ -373,7 +373,7 @@ class TestCoordinatorServiceRun:
         evt = await _make_event(db_session)
 
         svc = CoordinatorService(db_session)
-        result = await svc.run(evt.id)
+        await svc.run(evt.id)
 
         rows = (
             await db_session.execute(
@@ -502,7 +502,6 @@ class TestCoordinatorAPI:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         # Force awaiting_review status with no assessment row
-        from sqlalchemy import delete
         evt = await _make_event(db_session, status="awaiting_review")
         # Don't create an assessment row
 

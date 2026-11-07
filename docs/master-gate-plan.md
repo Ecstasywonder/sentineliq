@@ -4,7 +4,8 @@
 **Version:** 1.0  
 **Date:** 2026-11-03  
 **Author:** IBM Bob (Principal Architect)  
-**Source of Truth:** [Master Build Prompt](master-build-prompt.md) + session progress
+**Source of Truth:** [Master Build Prompt](master-build-prompt.md) and the
+[source-of-truth hierarchy](source-of-truth.md)
 
 ---
 
@@ -29,7 +30,7 @@ an older report's gate number.
 |------|------|--------|----------|
 | **0** | Environment and source-of-truth validation | ✅ Complete | `docs/gate-0-environment-report.md` |
 | **1** | BRD, SOP, and architecture specification | ✅ Complete | `docs/sentinel-brd.md`, `docs/sentinel-sop.md`, `docs/architecture.md` |
-| **2** | Repository scaffold and developer foundation | ⚠️ Partial — CI workflow has no job results; format and frontend lint checks fail | `docs/deployment.md`, `.github/workflows/ci.yml` |
+| **2** | Repository scaffold and developer foundation | 🟡 Candidate complete on EC2 — formatting and frontend quality checks now pass; strict completion awaits CI and merge to `main` | `docs/gate-14-16-completion.md`, `docs/deployment.md`, `.github/workflows/ci.yml` |
 | **3** | Database and domain model | ✅ Complete — mapped schema, migrations, core persistence repositories, seed framework, tests, and ER-equivalent documentation | `docs/data-model.md`, `backend/app/repositories/` |
 | **4** | Security-event simulator | ✅ Deterministic 19-scenario dataset, authenticated preview/persist API, validation, and idempotent seed behavior | `data/scenarios/mvp-scenarios.json`, `backend/app/services/simulator.py` |
 | **5** | Event ingestion and event queue backend | ✅ Complete | `docs/gate-5-event-ingestion-api.md` |
@@ -40,10 +41,10 @@ an older report's gate number.
 | **10** | Confidence engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
 | **11** | Triage Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-14-triage-agent.md` (legacy Gate 14) |
 | **12** | Context Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-15-context-agent.md` (legacy Gate 15) |
-| **13** | Explanation Agent | 🟡 In progress — 427 backend tests pass on EC2; not merged; live provider integration unverified | `backend/tests/test_explanation_agent.py` |
-| **14** | Coordinator and end-to-end agent workflow | ⚠️ Partial — assessment pipeline invokes agents and deterministic engines; complete workflow-state persistence is not verified | `backend/app/services/assessment_service.py` |
+| **13** | Explanation Agent | 🟡 Candidate implementation validated on EC2; live provider integration and strict CI/merge evidence remain outstanding | `backend/tests/test_explanation_agent.py`, `docs/gate-14-16-completion.md` |
+| **14** | Coordinator and end-to-end agent workflow | ⚠️ Partial — persisted backend workflow/recommendation path and EC2 end-to-end tests pass; live Orchestrate Coordinator import and invocation are unverified | `docs/gate-14-16-completion.md`, `backend/app/services/assessment_service.py` |
 | **15** | Human-review workflow | ✅ Complete — decision, escalation, audit, and feedback APIs are implemented and tested | Legacy Gates 10–13 reports |
-| **16** | Operator dashboard foundation | ⚠️ Partial — frontend shell exists; authentication, event queue, filters, and navigation remain | `frontend/src/App.tsx` |
+| **16** | Operator dashboard foundation | 🟡 Implementation complete on EC2 — shell, authentication, queue, filters, and navigation pass frontend validation; strict completion awaits CI and merge to `main` | `docs/gate-14-16-completion.md`, `frontend/src/App.tsx` |
 | **17** | Event decision interface | 🔲 Not started | — |
 | **18** | Audit and history interface | 🔲 Not started | — |
 | **19** | RBAC and administrative controls | ⚠️ Partial — backend RBAC exists; administrative UI and complete authorization validation remain | `docs/gate-6-rbac-auth.md` |
@@ -108,7 +109,8 @@ gate sequencing.
 - EC2: Ubuntu, Python 3.14.4, Node 20.20.2, Docker 29.9.2 confirmed; `uv` was
   unavailable during the latest environment check
 - Git remote: `https://github.com/Ecstasywonder/sentineliq.git`
-- All work runs on EC2; local machine is source-of-truth for files
+- All installations and validation run on EC2; see `docs/source-of-truth.md`
+  for authority and reconciliation rules
 
 ### Gate 1 — Specification
 - `docs/sentinel-brd.md` — Business Requirements Document (23 use cases, 8 FRs, 8 NFRs)
@@ -286,15 +288,20 @@ integration validation remain outstanding.
 
 | Validation | Result | Environment / notes |
 |------------|--------|----------------------|
-| Backend test suite | 397 passed | EC2, Python 3.14.4, before documentation-only merge commit |
-| Backend coverage | 91.57% | EC2; temporary XML output, tracked report preserved |
-| `ruff check app/ tests/` | Passed | EC2 |
-| `ruff format --check app/ tests/` | Failed | 31 files would be reformatted; includes six Gate 14/15 Python files |
+| Backend test suite | 533 passed | EC2 candidate worktree, Gates 14–16 validation |
+| Backend coverage | 90.48% | EC2 candidate worktree |
+| `ruff check app/ tests/` | Passed | EC2 candidate worktree |
+| `ruff format --check app/ tests/` | Passed across 114 files | EC2 candidate worktree |
+| PostgreSQL migration cycle | Passed | Fresh cycle plus released legacy-stamp upgrade to `0004`; 29 public tables and JSON snapshot column on EC2 |
+| Frontend validation | Passed | EC2: fresh install, format, TypeScript, ESLint, 14 unit tests, production build |
+| Frontend container path | Passed | EC2 image build; SPA 200; same-origin protected API proxy returned expected 401 |
+| Container secret boundary | Passed | Scratch image builds; runtime `.env` and key material excluded from backend image |
+| Frontend audit | 0 production vulnerabilities; 0 high/critical overall | Six moderate dev-only transitive findings remain |
 | GitHub Actions | Failed without creating jobs | No job logs were available; no branch protection is configured |
 
-This validation applies to the Gate 14/15 implementation before the merge commit;
-the current Gate 13 validation is recorded below. Neither snapshot alone declares
-all related gates complete.
+This evidence applies to an unmerged candidate worktree and does not change the
+strict completion rule. Gate 14 additionally requires a live Orchestrate
+Coordinator import and invocation. See `docs/gate-14-16-completion.md`.
 
 ### Gate 13 validation — unmerged working branch
 

@@ -11,7 +11,7 @@
 
 The local development machine (Windows 10) does not have Python, Node.js, or Docker accessible from the command line. The project requires a working build, test, and runtime environment throughout development.
 
-The project owner has an AWS EC2 instance (`ubuntu@98.81.243.2`) available for development use.
+The project owner has an AWS EC2 environment available for development use.
 
 ---
 
@@ -21,13 +21,16 @@ All build, test, and runtime execution will occur on the EC2 server.
 
 **Workflow:**
 
-1. IBM Bob creates and edits all source files in the local `SentinelIQ Project` workspace
-2. Changes are committed and pushed to a Git repository (GitHub)
-3. On EC2, the repository is cloned/pulled and commands are executed
-4. Command output is relayed back to IBM Bob for validation
-5. IBM Bob interprets results and continues development
+1. Source is authored and reviewed in a working copy.
+2. The candidate commit is made available to an isolated EC2 worktree.
+3. Dependency installation, builds, tests, migrations, and runtime checks run on EC2.
+4. Command output is recorded with its commit SHA and reviewed.
+5. Reviewed changes are validated in CI and merged to `origin/main`.
 
-**File authority:** The local workspace (and Git repository) is the canonical source of truth. EC2 is the execution environment.
+**File authority:** A local workspace and an EC2 worktree are candidate copies,
+not canonical authority. After review and merge, `origin/main` is the source
+authority; requirements, API, schema, policy, and runtime evidence are resolved
+according to `docs/source-of-truth.md`. EC2 is the required execution environment.
 
 ---
 

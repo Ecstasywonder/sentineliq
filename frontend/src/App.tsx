@@ -474,8 +474,7 @@ function AuditPage(): React.JSX.Element {
 
   const load = useCallback(
     (p: number) => getGlobalAudit(p, actionFilter, actorFilter),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filterKey],
+    [filterKey], // intentional: re-run only on filterKey bump, not on every keystroke
   );
 
   const applyFilters = () => setFilterKey((k) => k + 1);

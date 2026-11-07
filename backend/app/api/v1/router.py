@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import audit as audit_router
 from app.api.v1.endpoints import auth as auth_router
+from app.api.v1.endpoints import coordinator as coordinator_router
 from app.api.v1.endpoints import decisions as decisions_router
 from app.api.v1.endpoints import escalations as escalations_router
 from app.api.v1.endpoints import events as events_router
@@ -87,4 +88,12 @@ api_v1_router.include_router(
     simulator_router.router,
     prefix="/simulator",
     tags=["Simulator"],
+)
+
+# Coordinator — read-only Sentinel Coordinator review (Gate 17)
+# Mounted under /events so paths resolve to /events/{id}/review
+api_v1_router.include_router(
+    coordinator_router.router,
+    prefix="/events",
+    tags=["Coordinator"],
 )

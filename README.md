@@ -46,7 +46,8 @@ gate reports retain their original labels; the
 | 16 | Operator dashboard foundation | 🟡 Implementation complete on EC2; strict completion awaits CI and merge |
 | 17 | Event decision interface | ✅ Complete |
 | 18 | Audit and history interface | ✅ Complete |
-| 19–48 | Remaining MVP and production gates | 🔲 Pending |
+| 19 | RBAC and administrative controls | ✅ Complete |
+| 20–48 | Remaining MVP and production gates | 🔲 Pending |
 
 **Latest EC2 candidate validation:** 537 backend tests passed at 90.39% coverage
 under the production-floor Python 3.11 runtime with greenlet-aware tracing;

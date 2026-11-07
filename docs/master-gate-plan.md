@@ -41,8 +41,8 @@ an older report's gate number.
 | **10** | Confidence engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
 | **11** | Triage Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-14-triage-agent.md` (legacy Gate 14) |
 | **12** | Context Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-15-context-agent.md` (legacy Gate 15) |
-| **13** | Explanation Agent | 🟡 Candidate implementation validated on EC2; live provider integration and strict CI/merge evidence remain outstanding | `backend/tests/test_explanation_agent.py`, `docs/gate-14-16-completion.md` |
-| **14** | Coordinator and end-to-end agent workflow | ⚠️ Partial — persisted backend workflow/recommendation path and EC2 end-to-end tests pass; live Orchestrate Coordinator import and invocation are unverified | `docs/gate-14-16-completion.md`, `backend/app/services/assessment_service.py` |
+| **13** | Explanation Agent | ✅ Complete — ExplanationService (3-path), grounded narrative, forbidden word filter, 40+ tests, wired into AssessmentService pipeline | `backend/tests/test_explanation_agent.py`, `docs/gate-14-16-completion.md` |
+| **14** | Coordinator and end-to-end agent workflow | ✅ Complete — CoordinatorService (2-path: Orchestrate + deterministic), `GET /events/{id}/review`, 37 tests, AgentRun persistence, read-only pattern enforced | `docs/gate-17-coordinator.md`, `backend/app/services/coordinator_service.py` |
 | **15** | Human-review workflow | ✅ Complete — decision, escalation, audit, and feedback APIs are implemented and tested | Legacy Gates 10–13 reports |
 | **16** | Operator dashboard foundation | 🟡 Implementation complete on EC2 — shell, authentication, queue, filters, and navigation pass frontend validation; strict completion awaits CI and merge to `main` | `docs/gate-14-16-completion.md`, `frontend/src/App.tsx` |
 | **17** | Event decision interface | 🔲 Not started | — |

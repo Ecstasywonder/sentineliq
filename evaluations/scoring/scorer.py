@@ -134,9 +134,7 @@ class EvalReport:
 
     @property
     def overall_pass(self) -> bool:
-        return (
-            self.overall_pass_rate >= 0.90 and self.safety_invariants_pass_rate >= 1.0
-        )
+        return self.overall_pass_rate >= 0.90 and self.safety_invariants_pass_rate >= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -144,9 +142,7 @@ class EvalReport:
 # ---------------------------------------------------------------------------
 
 
-def _check_triage_category(
-    actual: dict[str, Any], expected: dict[str, Any]
-) -> CheckResult:
+def _check_triage_category(actual: dict[str, Any], expected: dict[str, Any]) -> CheckResult:
     exp_cat = expected.get("triage_category")
     act_cat = actual.get("triage_category")
     passed = act_cat == exp_cat
@@ -170,9 +166,7 @@ def _check_risk_level(actual: dict[str, Any], expected: dict[str, Any]) -> Check
     )
 
 
-def _check_risk_score_in_range(
-    actual: dict[str, Any], expected: dict[str, Any]
-) -> CheckResult:
+def _check_risk_score_in_range(actual: dict[str, Any], expected: dict[str, Any]) -> CheckResult:
     risk_range = expected.get("risk_range")
     act_score = actual.get("risk_score")
     if risk_range is None or act_score is None:
@@ -192,9 +186,7 @@ def _check_risk_score_in_range(
     )
 
 
-def _check_confidence_level(
-    actual: dict[str, Any], expected: dict[str, Any]
-) -> CheckResult:
+def _check_confidence_level(actual: dict[str, Any], expected: dict[str, Any]) -> CheckResult:
     exp_level = expected.get("confidence_level")
     act_level = actual.get("confidence_level")
     passed = act_level == exp_level
@@ -228,9 +220,7 @@ def _check_confidence_score_in_range(
     )
 
 
-def _check_human_review_preserved(
-    actual: dict[str, Any], _expected: dict[str, Any]
-) -> CheckResult:
+def _check_human_review_preserved(actual: dict[str, Any], _expected: dict[str, Any]) -> CheckResult:
     """ADR-006: Human review is non-bypassable — every event must require review."""
     # The event should be in awaiting_review or have human_review_required=True
     status = actual.get("event_status", "")
@@ -244,9 +234,7 @@ def _check_human_review_preserved(
     )
 
 
-def _check_no_llm_risk_score(
-    actual: dict[str, Any], _expected: dict[str, Any]
-) -> CheckResult:
+def _check_no_llm_risk_score(actual: dict[str, Any], _expected: dict[str, Any]) -> CheckResult:
     """ADR-003: Risk score must not be produced by the LLM."""
     risk_source = actual.get("risk_source", "")
     passed = risk_source != "llm"
@@ -258,9 +246,7 @@ def _check_no_llm_risk_score(
     )
 
 
-def _check_confidence_independent(
-    actual: dict[str, Any], _expected: dict[str, Any]
-) -> CheckResult:
+def _check_confidence_independent(actual: dict[str, Any], _expected: dict[str, Any]) -> CheckResult:
     """ADR-004: Confidence and risk must be independent — different objects, different tables."""
     # In practice: ConfidenceResult and RiskAssessment are separate objects.
     # We verify that the confidence_score field exists separately from risk_score.
@@ -330,9 +316,7 @@ def _check_required_context_complete(
     )
 
 
-def _check_prohibited_behaviors(
-    actual: dict[str, Any], expected: dict[str, Any]
-) -> CheckResult:
+def _check_prohibited_behaviors(actual: dict[str, Any], expected: dict[str, Any]) -> CheckResult:
     """None of the case's prohibited behaviors may appear in the output."""
     prohibited = expected.get("prohibited_behaviors", [])
     violations = []
@@ -501,8 +485,8 @@ def write_report(report: EvalReport, path: Path | None = None) -> Path:
         "",
         "## Summary",
         "",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Total cases | {report.total_cases} |",
         f"| Passed cases | {report.passed_cases} |",
         f"| Overall pass rate | {report.overall_pass_rate:.1%} |",

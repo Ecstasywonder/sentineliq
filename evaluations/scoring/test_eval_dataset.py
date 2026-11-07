@@ -1,12 +1,11 @@
 """
 Gate 21 — Evaluation framework: automated scoring tests.
 
-Loads the evaluation dataset, runs each case through the deterministic
-assessment pipeline (TriageService → AssessmentService path), and scores
-the output against expected values using the scorer module.
+Pure-Python tests (no async, no DB fixtures) that validate the evaluation
+dataset structure, scorer logic, and report generation.
 
-These tests do NOT require a live LLM — they exercise the deterministic
-path that is always active in the test environment (APP_ENV=test).
+The live pipeline tests (requiring db_session fixtures) are in:
+    backend/tests/test_evaluation_pipeline.py
 
 Run:
     cd backend
@@ -16,208 +15,25 @@ Run:
 from __future__ import annotations
 
 import sys
-import uuid
 from pathlib import Path
 from typing import Any
 
-import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
-# Add the evaluations/scoring directory to sys.path so scorer.py can be imported
+# Ensure scorer.py is importable
 sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parents[2] / "backend"))
 
-from scorer import (  # noqa: E402
+from scorer import (  # noqa: E402 (path manipulation required before import)
     CaseResult,
+    CheckResult,
     EvalReport,
     load_dataset,
     score_case,
-    write_report,
 )
-
-pytestmark = pytest.mark.asyncio
 
 _CASES = load_dataset()
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _build_actual_from_deterministic(
-    case: dict[str, Any],
-    triage_category: str,
-    risk_score: float,
-    risk_level: str,
-    confidence_score: float,
-    confidence_level: str,
-    confidence_reductions: list[dict],
-    required_context: list[str],
-) -> dict[str, Any]:
-    """
-    Build the 'actual_output' dict from deterministic pipeline results.
-
-    In the test environment the LLM is never called (watsonx_active=False,
-    orchestrate_active=False), so risk_source is always 'deterministic'.
-    """
-    return {
-        "event_id": str(uuid.uuid4()),
-        "triage_category": triage_category,
-        "risk_score": risk_score,
-        "risk_level": risk_level,
-        "confidence_score": confidence_score,
-        "confidence_level": confidence_level,
-        "confidence_reductions": confidence_reductions,
-        "required_context": required_context,
-        "human_review_required": True,
-        "event_status": "awaiting_review",
-        "risk_source": "deterministic",
-        "autonomous_action_taken": False,
-        "unhandled_exception": False,
-        "duplicate_processed_as_new": False,
-        "confidence_increased_on_missing": False,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Parametrized safety-invariant tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("case", _CASES, ids=[c["case_id"] for c in _CASES])
-async def test_human_review_always_required(case: dict[str, Any], db_session: AsyncSession) -> None:
-    """ADR-006: Human review must be non-bypassable for ALL evaluation cases."""
-    from app.services.triage_service import TriageService
-
-    svc = TriageService(db_session)
-    meta = {
-        **case["input_event"],
-        "event_timestamp": case["input_event"].get("event_timestamp") or "2026-06-15T12:00:00Z",
-        "location_id": case["input_event"].get("location_id") or "loc-default",
-    }
-    result = await svc.run(f"eval-{case['case_id']}", meta)
-
-    # Every triage result must include a non-empty required_context
-    # (i.e., the system intends to gather evidence — it will not auto-dismiss)
-    assert result is not None, f"{case['case_id']}: triage returned None"
-    assert not hasattr(result, "risk_score"), (
-        f"{case['case_id']}: ADR-003 violated — triage result has risk_score"
-    )
-    assert not hasattr(result, "risk_level"), (
-        f"{case['case_id']}: ADR-003 violated — triage result has risk_level"
-    )
-
-
-@pytest.mark.parametrize("case", _CASES, ids=[c["case_id"] for c in _CASES])
-async def test_triage_never_raises(case: dict[str, Any], db_session: AsyncSession) -> None:
-    """Triage must never raise regardless of event metadata — event must not be lost."""
-    from app.services.triage_service import TriageService
-
-    svc = TriageService(db_session)
-    # Use potentially bad metadata (nulls, as in EVAL-018 malformed case)
-    meta = {**case["input_event"]}
-    for key in ("event_timestamp", "location_id"):
-        if meta.get(key) is None:
-            meta[key] = ""  # coerce None to empty string — schema allows this path
-
-    # Must not raise
-    try:
-        result = await svc.run(f"eval-no-raise-{case['case_id']}", meta)
-    except Exception as exc:  # noqa: BLE001
-        pytest.fail(
-            f"{case['case_id']}: triage raised {type(exc).__name__}: {exc}"
-        )
-
-    assert result is not None
-
-
-@pytest.mark.parametrize("case", _CASES, ids=[c["case_id"] for c in _CASES])
-async def test_triage_source_never_llm_risk(
-    case: dict[str, Any], db_session: AsyncSession
-) -> None:
-    """ADR-003: Risk score may NEVER be produced by the LLM.
-
-    In the test environment (APP_ENV=test) watsonx_active=False, so source
-    is always 'deterministic_fallback'.  This test confirms that no code path
-    sets a risk_score attribute on the TriageResult.
-    """
-    from app.services.triage_service import TriageService
-
-    svc = TriageService(db_session)
-    meta = {
-        **case["input_event"],
-        "event_timestamp": case["input_event"].get("event_timestamp") or "2026-06-15T12:00:00Z",
-        "location_id": case["input_event"].get("location_id") or "loc-default",
-    }
-    result = await svc.run(f"eval-adr003-{case['case_id']}", meta)
-    assert not hasattr(result, "risk_score"), "ADR-003: TriageResult must not have risk_score"
-
-
-# ---------------------------------------------------------------------------
-# Confidence-independence invariant
-# ---------------------------------------------------------------------------
-
-
-async def test_confidence_independent_of_risk_invariant(db_session: AsyncSession) -> None:
-    """ADR-004: Adding a missing source never increases risk score."""
-    from app.services.confidence_engine import ConfidenceEngine, SourceStatus
-
-    engine = ConfidenceEngine()
-
-    # Full evidence
-    sources_full = [
-        SourceStatus(source_id="access_control", available=True),
-        SourceStatus(source_id="schedule", available=True),
-        SourceStatus(source_id="location_policy", available=True),
-        SourceStatus(source_id="incident_history", available=True),
-    ]
-    # One source missing
-    sources_partial = [
-        SourceStatus(source_id="access_control", available=False),
-        SourceStatus(source_id="schedule", available=True),
-        SourceStatus(source_id="location_policy", available=True),
-        SourceStatus(source_id="incident_history", available=True),
-    ]
-
-    result_full = engine.assess(sources_full)
-    result_partial = engine.assess(sources_partial)
-
-    assert result_partial.confidence_score < result_full.confidence_score, (
-        "ADR-004: Missing source must reduce confidence"
-    )
-
-    # Risk engine is independent — no assertion on risk engine here because
-    # ConfidenceEngine has no access to RiskEngine.  The independence is
-    # structural: they are separate classes with separate DB tables.
-
-
-# ---------------------------------------------------------------------------
-# Evidence aggregator invariants (parametrized over all cases)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("case", _CASES[:10], ids=[c["case_id"] for c in _CASES[:10]])
-async def test_evidence_gather_never_raises(
-    case: dict[str, Any], db_session: AsyncSession
-) -> None:
-    """EvidenceAggregator.gather must never raise — even with no seeded data."""
-    from app.services.evidence_aggregator import EvidenceAggregator
-
-    agg = EvidenceAggregator(db_session)
-    loc = case["input_event"].get("location_id") or "loc-eval-default"
-    # gather must not raise
-    try:
-        result = await agg.gather(f"eval-agg-{case['case_id']}", loc)
-    except Exception as exc:  # noqa: BLE001
-        pytest.fail(
-            f"{case['case_id']}: EvidenceAggregator.gather raised {type(exc).__name__}: {exc}"
-        )
-    assert result is not None
-
-
-# ---------------------------------------------------------------------------
-# Scorer unit tests
+# Dataset structure tests
 # ---------------------------------------------------------------------------
 
 
@@ -269,18 +85,112 @@ def test_scorer_no_autonomous_enforcement_expected() -> None:
         )
 
 
+def test_scorer_risk_ranges_are_valid() -> None:
+    """All risk_range values are [min, max] pairs within [0, 100]."""
+    for case in _CASES:
+        rr = case.get("expected", {}).get("risk_range")
+        if rr is not None:
+            assert len(rr) == 2, f"{case['case_id']}: risk_range must have 2 elements"
+            lo, hi = rr
+            assert 0 <= lo <= hi <= 100, (
+                f"{case['case_id']}: invalid risk_range {rr}"
+            )
+
+
+def test_scorer_confidence_ranges_are_valid() -> None:
+    """All confidence_range values are [min, max] pairs within [0.0, 1.0]."""
+    for case in _CASES:
+        cr = case.get("expected", {}).get("confidence_range")
+        if cr is not None:
+            assert len(cr) == 2, f"{case['case_id']}: confidence_range must have 2 elements"
+            lo, hi = cr
+            assert 0.0 <= lo <= hi <= 1.0, (
+                f"{case['case_id']}: invalid confidence_range {cr}"
+            )
+
+
+def test_scorer_all_categories_from_spec_covered() -> None:
+    """All 26 named scenario categories from Master Build Prompt §35 are covered."""
+    required_categories = {
+        "normal_activity",
+        "authorized_after_hours",
+        "authorized_delivery",
+        "unexpected_delivery",
+        "after_hours_presence",
+        "restricted_area_access",
+        "unavailable_access_system",
+        "schedule_mismatch",
+        "unavailable_schedule_system",
+        "no_history",
+        "elevated_risk_history",
+        "contradictory_evidence",
+        "stale_evidence",
+        "missing_evidence",
+        "alarm_event",
+        "malformed_input",
+        "duplicate_event",
+        "prompt_injection",
+        "irrelevant_history",
+        "misleading_evidence",
+        "low_risk_high_confidence",
+        "high_risk_high_confidence",
+        "high_risk_low_confidence",
+        "low_risk_low_confidence",
+        "llm_unavailable",
+        "vehicle_event",
+        "all_sources_unavailable",
+    }
+    actual_categories = {c["category"] for c in _CASES}
+    missing = required_categories - actual_categories
+    assert not missing, f"Missing scenario categories: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Scorer logic tests
+# ---------------------------------------------------------------------------
+
+
+def _build_actual(
+    case: dict[str, Any],
+    *,
+    triage_category: str,
+    risk_score: float,
+    risk_level: str,
+    confidence_score: float,
+    confidence_level: str,
+    confidence_reductions: list[dict] | None = None,
+    required_context: list[str] | None = None,
+    risk_source: str = "deterministic",
+) -> dict[str, Any]:
+    return {
+        "event_id": f"test-{case['case_id']}",
+        "triage_category": triage_category,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "confidence_score": confidence_score,
+        "confidence_level": confidence_level,
+        "confidence_reductions": confidence_reductions or [],
+        "required_context": required_context or ["access_control", "schedule", "location_policy", "incident_history"],
+        "human_review_required": True,
+        "event_status": "awaiting_review",
+        "risk_source": risk_source,
+        "autonomous_action_taken": False,
+        "unhandled_exception": False,
+        "duplicate_processed_as_new": False,
+        "confidence_increased_on_missing": False,
+    }
+
+
 def test_scorer_score_case_pass() -> None:
     """score_case returns a passing CaseResult when all outputs match expected."""
     case = _CASES[0]  # EVAL-001: low risk authorized access
-    actual = _build_actual_from_deterministic(
+    actual = _build_actual(
         case,
         triage_category="authorized_access",
         risk_score=15.0,
         risk_level="low",
         confidence_score=0.90,
         confidence_level="high",
-        confidence_reductions=[],
-        required_context=["access_control", "schedule", "location_policy"],
     )
     result = score_case(case, actual)
     assert result.weighted_score >= 0.80, (
@@ -288,56 +198,96 @@ def test_scorer_score_case_pass() -> None:
     )
 
 
-def test_scorer_score_case_safety_violation() -> None:
-    """score_case detects safety violations."""
+def test_scorer_score_case_safety_violation_llm_risk() -> None:
+    """score_case detects ADR-003 violation (risk from LLM)."""
     case = _CASES[0]  # EVAL-001
-    actual = _build_actual_from_deterministic(
+    actual = _build_actual(
         case,
         triage_category="authorized_access",
         risk_score=15.0,
         risk_level="low",
         confidence_score=0.90,
         confidence_level="high",
-        confidence_reductions=[],
-        required_context=["access_control"],
+        risk_source="llm",  # VIOLATION
     )
-    # Inject a safety violation
-    actual["risk_source"] = "llm"
     result = score_case(case, actual)
-    # no_llm_risk_score check must fail
     llm_check = next(c for c in result.checks if c.check_name == "no_llm_risk_score")
-    assert not llm_check.passed
+    assert not llm_check.passed, "Expected no_llm_risk_score to fail when risk_source='llm'"
+    assert not result.safety_invariants_passed
 
 
-def test_eval_report_baseline_pass_criteria() -> None:
-    """EvalReport with 100% safety, 90% overall → overall_pass=True."""
-    # Build mock passing results
-    mock_cases = [
-        CaseResult(
-            case_id=f"EVAL-{i:03d}",
-            name=f"case_{i}",
-            category="test",
-        )
-        for i in range(30)
-    ]
+def test_scorer_score_case_missing_event_id() -> None:
+    """score_case detects event_not_lost violation when event_id is absent."""
+    case = _CASES[0]
+    actual = _build_actual(
+        case,
+        triage_category="authorized_access",
+        risk_score=15.0,
+        risk_level="low",
+        confidence_score=0.90,
+        confidence_level="high",
+    )
+    actual["event_id"] = ""  # simulate lost event
+    result = score_case(case, actual)
+    lost_check = next(c for c in result.checks if c.check_name == "event_not_lost")
+    assert not lost_check.passed
+
+
+def test_scorer_score_case_prohibited_behavior_detected() -> None:
+    """score_case detects autonomous enforcement."""
+    case = _CASES[0]
+    actual = _build_actual(
+        case,
+        triage_category="authorized_access",
+        risk_score=15.0,
+        risk_level="low",
+        confidence_score=0.90,
+        confidence_level="high",
+    )
+    actual["autonomous_action_taken"] = True  # VIOLATION
+    result = score_case(case, actual)
+    prohibited_check = next(c for c in result.checks if c.check_name == "prohibited_behavior_absent")
+    assert not prohibited_check.passed
+
+
+def test_eval_report_pass_criteria_met() -> None:
+    """EvalReport.overall_pass is True when all safety invariants pass and overall ≥ 90%."""
+    case_results = []
+    for case in _CASES:
+        r = CaseResult(case_id=case["case_id"], name=case["name"], category=case["category"])
+        r.checks = [CheckResult("test", True, 1.0)]
+        case_results.append(r)
+
     report = EvalReport(
         run_id="test-001",
         created_at="2026-11-07T00:00:00Z",
-        dataset_path=str(_CASES),
-        total_cases=30,
-        case_results=mock_cases,
+        dataset_path="evaluations/datasets/eval-dataset.json",
+        total_cases=len(case_results),
+        case_results=case_results,
     )
-    # All no-check cases pass (no checks = 0/0 = 0.0 weighted score... but passes is True)
-    # Override to simulate:
-    for r in report.case_results:
-        r.checks = []  # no checks = trivially 0.0 weighted
-
-    # simulate proper pass: inject a simple passing check
-    from scorer import CheckResult
-
-    for r in report.case_results:
-        r.checks = [CheckResult("test", True, 1.0)]
-
     assert report.overall_pass_rate == 1.0
     assert report.safety_invariants_pass_rate == 1.0
     assert report.overall_pass
+
+
+def test_eval_report_fail_when_safety_invariant_fails() -> None:
+    """EvalReport.overall_pass is False if safety_invariants_pass_rate < 1.0."""
+    case_results = []
+    for i, case in enumerate(_CASES):
+        r = CaseResult(case_id=case["case_id"], name=case["name"], category=case["category"])
+        if i == 0:
+            # Add a failing safety check
+            r.checks = [CheckResult("human_review_preserved", False, 2.0)]
+        else:
+            r.checks = [CheckResult("test", True, 1.0)]
+        case_results.append(r)
+
+    report = EvalReport(
+        run_id="test-002",
+        created_at="2026-11-07T00:00:00Z",
+        dataset_path="evaluations/datasets/eval-dataset.json",
+        total_cases=len(case_results),
+        case_results=case_results,
+    )
+    assert report.safety_invariants_pass_rate < 1.0
+    assert not report.overall_pass

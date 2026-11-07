@@ -56,6 +56,9 @@ Actions are release-version pinned rather than referenced through `latest`.
 Gitleaks v3 runs on the supported Node 24 action runtime; its job receives only
 read access to repository contents and pull-request metadata, with PR comments
 disabled.
+The Trivy jobs use the immutable `v0.36.0` release, whose setup dependency is
+pinned by commit SHA; this replaces `v0.28.0`, which referenced a setup tag no
+longer available to GitHub Actions.
 For higher-assurance deployments, renovate/dependabot plus commit-SHA action
 pinning can be added once an automated update owner is in place.
 

@@ -29,7 +29,14 @@ AUDIT_ACTIONS = (
     "feedback_submitted",
     "error",
     "status_changed",
+    "event_status_transitioned",
     "override",
+    "admin_user_created",
+    "admin_user_updated",
+    "admin_user_deactivated",
+    "admin_role_granted",
+    "admin_role_removed",
+    "service_identity_provisioned",
 )
 
 

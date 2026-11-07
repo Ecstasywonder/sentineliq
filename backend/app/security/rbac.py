@@ -96,6 +96,13 @@ _ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "tools:read",
         }
     ),
+    "agent_tool_reader": frozenset({"tools:read"}),
+    "event_ingestor": frozenset({"events:ingest"}),
+}
+
+SERVICE_PURPOSE_POLICIES: dict[str, tuple[str, frozenset[str]]] = {
+    "orchestrate_tools": ("agent_tool_reader", frozenset({"tools:read"})),
+    "event_ingestion": ("event_ingestor", frozenset({"events:ingest"})),
 }
 
 
@@ -110,3 +117,16 @@ def permissions_for_roles(roles: list[str]) -> frozenset[str]:
 def has_permission(roles: list[str], permission: str) -> bool:
     """Return True if any of *roles* grants *permission*."""
     return permission in permissions_for_roles(roles)
+
+
+def service_purpose_allows(purpose: str, roles: list[str], permission: str) -> bool:
+    """Apply the immutable upper bound carried by a service-purpose token.
+
+    Database role changes can revoke a service token, but cannot expand it
+    beyond the purpose signed into the token.
+    """
+    policy = SERVICE_PURPOSE_POLICIES.get(purpose)
+    if policy is None:
+        return False
+    required_role, allowed_permissions = policy
+    return required_role in roles and permission in allowed_permissions

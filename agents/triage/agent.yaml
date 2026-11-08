@@ -20,12 +20,11 @@ description: >
   or identity claims.  It only classifies and routes.
 
 llm: watsonx/ibm/granite-3-3-8b-instruct
-style: react_core
+# default style: agent reads the user message and responds directly.
+# No tool calls are needed — the full event payload is supplied inline.
+style: default
 collaborators: []
-
-# The tool contract is generated from FastAPI by agents/generate_tool_openapi.py.
-tools:
-  - get_event_detail
+tools: []
 
 instructions: |
   You are the SentinelIQ Triage Agent.

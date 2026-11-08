@@ -28,10 +28,12 @@ description: >
   risk scores or enforcement decisions — those come from deterministic engines.
 
 llm: watsonx/ibm/granite-4-h-small
-style: react_core
+# default style: agent reads the fully assembled assessment package from the
+# user message directly. The backend supplies all data inline before invoking
+# Orchestrate, so no tool calls are needed.
+style: default
 collaborators: []
-tools:
-  - get_assessment_bundle
+tools: []
 
 instructions: |
   You are the SentinelIQ Explanation Agent.

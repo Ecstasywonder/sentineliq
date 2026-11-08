@@ -20,18 +20,12 @@ description: >
   enforcement decisions.
 
 llm: watsonx/ibm/granite-4-h-small
-style: react_core
+# default style: agent reads the pre-gathered evidence package from the user
+# message directly. Tool calls are not needed — the backend supplies all
+# evidence inline before invoking Orchestrate.
+style: default
 collaborators: []
-tools:
-  - get_event_detail
-  - get_access_events
-  - get_schedule
-  - get_work_orders
-  - get_delivery
-  - get_location_policy
-  - get_incident_history
-  - search_knowledge
-  - get_integration_health
+tools: []
 
 instructions: |
   You are the SentinelIQ Context Agent.

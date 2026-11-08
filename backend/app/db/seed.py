@@ -18,7 +18,7 @@ import structlog
 from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
-from app.models import (  # noqa: F401 — ensure all models registered
+from app.models import (
     Camera,
     Facility,
     IncidentHistory,
@@ -31,6 +31,7 @@ from app.models import (  # noqa: F401 — ensure all models registered
     User,
     UserRole,
 )
+from app.security.passwords import hash_password
 
 logger = structlog.get_logger(__name__)
 
@@ -347,6 +348,7 @@ INTEGRATION_HEALTH_RECORDS = [
 # Seeder
 # ---------------------------------------------------------------------------
 async def seed() -> None:
+    """Idempotent seed — safe to run multiple times against an existing DB."""
     logger.info("seed.start")
 
     async with AsyncSessionLocal() as session:
@@ -361,73 +363,126 @@ async def seed() -> None:
         logger.info("seed.roles_done")
 
         # Facility
-        fac = Facility(**FACILITY, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
-        session.add(fac)
-        await session.commit()
+        existing_fac = await session.get(Facility, FACILITY["id"])
+        if existing_fac is None:
+            session.add(
+                Facility(**FACILITY, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+            )
+            await session.commit()
         logger.info("seed.facility_done")
 
         # Locations
         for loc_data in LOCATIONS:
-            loc = Location(**loc_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
-            session.add(loc)
+            if await session.get(Location, loc_data["id"]) is None:
+                session.add(
+                    Location(**loc_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+                )
         await session.commit()
         logger.info("seed.locations_done")
 
         # Cameras
         for cam_data in CAMERAS:
-            cam = Camera(**cam_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
-            session.add(cam)
+            if await session.get(Camera, cam_data["id"]) is None:
+                session.add(
+                    Camera(**cam_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+                )
         await session.commit()
         logger.info("seed.cameras_done")
 
-        # Security rules
+        # Security rules — keyed by rule_code (id is random, so check code)
         for rule_data in SECURITY_RULES:
-            rule = SecurityRule(
-                **rule_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+            existing_rule = await session.scalar(
+                select(SecurityRule).where(SecurityRule.rule_code == rule_data["rule_code"])
             )
-            session.add(rule)
+            if existing_rule is None:
+                session.add(
+                    SecurityRule(
+                        **rule_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+                    )
+                )
         await session.commit()
         logger.info("seed.security_rules_done")
 
         # Risk policy
-        policy = RiskPolicy(
-            **RISK_POLICY, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
-        )
-        session.add(policy)
-        await session.commit()
-
-        for f in RISK_FACTORS:
-            factor = RiskPolicyFactor(
-                id=_id(),
-                policy_id="pol-001",
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-                **f,
+        if await session.get(RiskPolicy, RISK_POLICY["id"]) is None:
+            session.add(
+                RiskPolicy(
+                    **RISK_POLICY, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+                )
             )
-            session.add(factor)
-        await session.commit()
+            await session.commit()
+
+            for f in RISK_FACTORS:
+                session.add(
+                    RiskPolicyFactor(
+                        id=_id(),
+                        policy_id="pol-001",
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                        **f,
+                    )
+                )
+            await session.commit()
         logger.info("seed.risk_policy_done")
 
-        # Incident history
+        # Incident history — keyed by incident_code
         for inc_data in INCIDENT_HISTORY:
-            inc = IncidentHistory(
-                **inc_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+            existing_inc = await session.scalar(
+                select(IncidentHistory).where(
+                    IncidentHistory.incident_code == inc_data["incident_code"]
+                )
             )
-            session.add(inc)
+            if existing_inc is None:
+                session.add(
+                    IncidentHistory(
+                        **inc_data, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)
+                    )
+                )
         await session.commit()
         logger.info("seed.incident_history_done")
 
-        # Integration health
+        # Integration health — keyed by source_id
         for ih_data in INTEGRATION_HEALTH_RECORDS:
-            ih = IntegrationHealth(
-                id=_id(),
-                **ih_data,
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
+            existing_ih = await session.scalar(
+                select(IntegrationHealth).where(IntegrationHealth.source_id == ih_data["source_id"])
             )
-            session.add(ih)
+            if existing_ih is None:
+                session.add(
+                    IntegrationHealth(
+                        id=_id(),
+                        **ih_data,
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
         await session.commit()
         logger.info("seed.integration_health_done")
+
+        # Demo operator account — idempotent, only created if email is absent
+        demo_email = "demo@sentineliq.dev"
+        demo_password = "SentinelIQ-Demo-2026"
+        demo_role_name = "officer"
+        existing_demo = await session.scalar(select(User).where(User.email == demo_email))
+        if existing_demo is None:
+            demo_user = User(
+                email=demo_email,
+                full_name="Demo Operator",
+                hashed_password=hash_password(demo_password),
+                is_active=True,
+                is_verified=True,
+            )
+            session.add(demo_user)
+            await session.flush()  # get demo_user.id
+
+            demo_role = await session.scalar(select(Role).where(Role.name == demo_role_name))
+            if demo_role:
+                session.add(
+                    UserRole(user_id=demo_user.id, role_id=demo_role.id, granted_by="system:seed")
+                )
+            await session.commit()
+            logger.info("seed.demo_user_created", email=demo_email)
+        else:
+            logger.info("seed.demo_user_already_exists", email=demo_email)
 
     logger.info("seed.complete")
 

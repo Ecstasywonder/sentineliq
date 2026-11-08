@@ -51,9 +51,9 @@ an older report's gate number.
 | **20** | Integration and failure-state hardening | ✅ Complete — 30 tests covering 9 failure scenarios; all architecture invariants verified; 638 backend + 39 frontend tests passing | `docs/gate-20-failure-hardening.md` |
 | **21** | Evaluation framework | ✅ Complete — 30-case dataset (all 26 MBP §35 categories), scorer, 106 pipeline + 15 unit tests, baseline report | `docs/gate-21-evaluation-framework.md` |
 | **22** | Security and adversarial testing | ✅ Complete — 782 backend tests and adversarial controls validated on EC2; strict dependency/secret/image checks and the required CI Gate passed; PR #2 merged as `4a9d8c0` | `docs/threat-model.md`, `docs/gate-22-ci-supply-chain.md` |
-| **23** | MVP usability and operator validation readiness | 🔲 Not started | — |
-| **24** | MVP release candidate | 🔲 Not started | — |
-| **25** | MVP demonstration and freeze | 🔲 Not started | — |
+| **23** | MVP usability and operator validation readiness | ✅ Complete — 5 §51 demo scenarios (A-E) added to dataset, demo runner script, 18 frontend scenario journey tests, 57 frontend + 780 backend tests passing | `docs/gate-23-usability-demo-readiness.md`, `data/scenarios/mvp-scenarios.json`, `scripts/run_demo_scenarios.sh`, `frontend/src/test/demo_scenarios.test.tsx` |
+| **24** | MVP release candidate | ✅ Complete — full test suite (780+57+15), clean build, migration chain verified (0001-0005), evaluation pipeline (109 tests, 100% safety invariants), security checks clean, all §52 success criteria met | `docs/gate-24-release-candidate.md` |
+| **25** | MVP demonstration and freeze | 🔲 Pending demonstration — port-forwarding guide and step-by-step demonstration procedure ready | `docs/gate-25-mvp-demonstration.md` |
 | **26** | Production architecture ADRs | 🔲 Not started | — |
 | **27** | Provider adapter framework | 🔲 Not started | — |
 | **28** | Production event pipeline | 🔲 Not started | — |

@@ -18,7 +18,8 @@ from app.services.simulator import (
 def test_dataset_covers_all_required_scenario_types() -> None:
     scenarios = load_scenarios()
     scenario_ids = {scenario["id"] for scenario in scenarios}
-    assert len(scenarios) == 19
+    # 19 original scenarios + 5 Gate 23 demo scenarios (A-E) = 24 total
+    assert len(scenarios) == 24
     assert {
         "ordinary-employee-arrival",
         "authorized-maintenance",
@@ -39,6 +40,12 @@ def test_dataset_covers_all_required_scenario_types() -> None:
         "incomplete-metadata",
         "duplicated-event",
         "stale-evidence",
+        # Gate 23 — MVP usability demo scenarios (§51)
+        "demo-scenario-a",
+        "demo-scenario-b",
+        "demo-scenario-c",
+        "demo-scenario-d",
+        "demo-scenario-e",
     } == scenario_ids
     assert {scenario["expected_risk"] for scenario in scenarios} == {
         "low",
@@ -47,6 +54,27 @@ def test_dataset_covers_all_required_scenario_types() -> None:
         "critical",
     }
     assert event_payload(scenarios[0]) == event_payload(scenarios[0])
+
+
+def test_gate23_demo_scenarios_present() -> None:
+    """Gate 23: all five §51 demo scenarios are in the dataset and well-formed."""
+    scenarios = load_scenarios()
+    gate23 = {s["id"]: s for s in scenarios if s.get("gate23_scenario")}
+    assert set(gate23) == {
+        "demo-scenario-a",
+        "demo-scenario-b",
+        "demo-scenario-c",
+        "demo-scenario-d",
+        "demo-scenario-e",
+    }, "All five Gate 23 demo scenarios must be present"
+    labels = {s["gate23_scenario"] for s in gate23.values()}
+    assert labels == {"A", "B", "C", "D", "E"}, "Gate 23 scenarios must be labelled A-E"
+    # Each scenario must have a description and a valid event payload
+    for sid, scenario in gate23.items():
+        assert scenario.get("description"), f"{sid} must have a description"
+        payload = event_payload(scenario)
+        assert payload.get("provider_event_id"), f"{sid} must have a provider_event_id"
+        assert payload.get("event_type"), f"{sid} must have an event_type"
 
 
 def test_select_scenarios_rejects_unknown_id() -> None:

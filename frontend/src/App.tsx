@@ -73,7 +73,14 @@ const overrideRoles = new Set([
 const riskLabel = (risk: RiskLevel | null) =>
   risk ? `${risk[0].toUpperCase()}${risk.slice(1)}` : "Not assessed";
 
-const humanize = (value: string) => value.replace(/_/g, " ");
+const SOURCE_LABELS: Record<string, string> = {
+  orchestrate: "watsonx Orchestrate",
+  watsonx_ai: "watsonx.ai Chat API",
+  deterministic_fallback: "Deterministic Fallback",
+};
+
+const humanize = (value: string) =>
+  SOURCE_LABELS[value] ?? value.replace(/_/g, " ");
 
 const formatTime = (value: string) => {
   const timestamp = new Date(value);

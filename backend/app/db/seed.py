@@ -484,6 +484,32 @@ async def seed() -> None:
         else:
             logger.info("seed.demo_user_already_exists", email=demo_email)
 
+        # E2E smoke-test admin account (platform_admin) — idempotent
+        e2e_email = "e2e-admin@sentineliq.dev"
+        e2e_password = "SentinelIQ-E2E-Admin-2026"
+        e2e_role_name = "platform_admin"
+        existing_e2e = await session.scalar(select(User).where(User.email == e2e_email))
+        if existing_e2e is None:
+            e2e_user = User(
+                email=e2e_email,
+                full_name="E2E Admin",
+                hashed_password=hash_password(e2e_password),
+                is_active=True,
+                is_verified=True,
+            )
+            session.add(e2e_user)
+            await session.flush()
+
+            e2e_role = await session.scalar(select(Role).where(Role.name == e2e_role_name))
+            if e2e_role:
+                session.add(
+                    UserRole(user_id=e2e_user.id, role_id=e2e_role.id, granted_by="system:seed")
+                )
+            await session.commit()
+            logger.info("seed.e2e_admin_created", email=e2e_email)
+        else:
+            logger.info("seed.e2e_admin_already_exists", email=e2e_email)
+
     logger.info("seed.complete")
 
 

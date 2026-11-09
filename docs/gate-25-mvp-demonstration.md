@@ -352,10 +352,10 @@ On EC2 (separate terminal from the tunnel terminal):
 ```bash
 cd ~/sentineliq
 E2E_ALLOW_PERSISTENT_WRITES=yes \
-E2E_EMAIL=demo@sentineliq.dev \
-E2E_PASSWORD=SentinelIQ-Demo-2026 \
+E2E_EMAIL=e2e-admin@sentineliq.dev \
+E2E_PASSWORD=SentinelIQ-E2E-Admin-2026 \
 E2E_BASE_URL=http://localhost:8000 \
-E2E_PYTHON=backend/.venv/bin/python \
+E2E_PYTHON=/home/ubuntu/sentineliq/backend/.venv/bin/python \
 bash scripts/e2e_smoke.sh
 ```
 
@@ -399,7 +399,7 @@ Documentation updates and configuration changes remain permitted.
 | Human decision recorded | Decision form submitted successfully | ✅ Runnable |
 | Audit record created | Audit trail shows all actions | ✅ Runnable |
 | All §52 MVP success criteria met | Gate 24 release candidate §8 | ✅ Complete |
-| Automated smoke test passes | `scripts/e2e_smoke.sh` 0 failures | ✅ Runnable |
+| Automated smoke test passes | `scripts/e2e_smoke.sh` 0 failures | ✅ 108/108 passed (2026-11-09) |
 | Scope freeze acknowledged | This document signed off by operator | ⬜ Pending operator sign-off |
 
 ---

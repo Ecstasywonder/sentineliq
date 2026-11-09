@@ -306,117 +306,91 @@ class TestConflictDetection:
 
 
 class TestParseAndValidate:
+    """
+    _parse_and_validate now accepts only {event_id, context_summary} from the LLM.
+    All structural fields (source_statuses, conflicts, missing_sources, flags) come
+    from the deterministic engine.  The agent cannot override or contradict them.
+    """
+
     def _svc(self):
         return ContextService(session=None)
 
-    def _minimal_valid_json(self, event_id="EVT-001"):
-        return json.dumps(
-            {
-                "event_id": event_id,
-                "source_statuses": {
-                    "access_control": {
-                        "status": "verified_present",
-                        "record_count": 2,
-                        "summary": "Two badge entries found.",
-                    }
-                },
-                "conflicts": [],
-                "missing_sources": [],
-                "context_summary": "Two access records found. No conflicts detected.",
-                "has_conflicts": False,
-                "has_missing_sources": False,
-            }
-        )
+    def _minimal_valid_json(self, event_id="EVT-001", summary="Access records found. No conflicts."):
+        """Minimal valid LLM response under the new narrow contract."""
+        return json.dumps({"event_id": event_id, "context_summary": summary})
 
-    def test_valid_json_parses_correctly(self):
+    def test_valid_json_returns_authoritative_statuses(self):
+        """LLM provides summary; structural fields come from evidence."""
         svc = self._svc()
         ev = _make_evidence(access_events=_section_present(2))
         result = svc._parse_and_validate(
             "EVT-001", self._minimal_valid_json(), ["access_control"], ev, source="watsonx_ai"
         )
         assert result.source == "watsonx_ai"
+        # Structural fields are authoritative from evidence
         assert "access_control" in result.source_statuses
         assert result.source_statuses["access_control"].status == "verified_present"
+        assert result.source_statuses["access_control"].record_count == 2
+        # LLM summary is used
+        assert "Access records found" in result.context_summary
 
-    def test_unknown_source_key_is_rejected(self):
+    def test_llm_context_summary_overwrites_deterministic_summary(self):
+        """When LLM returns a non-empty summary it replaces the deterministic one."""
         svc = self._svc()
-        ev = _make_evidence()
+        ev = _make_evidence(access_events=_section_present(1))
+        llm_summary = "Unverified activity detected at the loading dock."
+        result = svc._parse_and_validate(
+            "EVT-001",
+            json.dumps({"event_id": "EVT-001", "context_summary": llm_summary}),
+            ["access_control"],
+            ev,
+            source="orchestrate",
+        )
+        assert result.context_summary == llm_summary
+
+    def test_empty_llm_summary_keeps_deterministic_summary(self):
+        """When LLM returns an empty summary, the deterministic summary is kept."""
+        svc = self._svc()
+        ev = _make_evidence(access_events=_section_present(1))
+        result = svc._parse_and_validate(
+            "EVT-001",
+            json.dumps({"event_id": "EVT-001", "context_summary": "   "}),
+            ["access_control"],
+            ev,
+            source="orchestrate",
+        )
+        # Falls back to deterministic summary (non-empty)
+        assert len(result.context_summary) > 0
+
+    def test_extra_fields_in_llm_output_are_silently_ignored(self):
+        """Old-style LLM output with source_statuses etc. does not cause an error."""
+        svc = self._svc()
+        ev = _make_evidence(access_events=_section_present(1))
+        # The agent might still return the old full structure — that is fine.
         raw = json.dumps(
             {
                 "event_id": "EVT-001",
-                "source_statuses": {
-                    "access_control": {"status": "verified_present"},
-                    "malicious_injection": {"status": "verified_present"},  # unknown
-                },
-                "conflicts": [],
+                "context_summary": "One record found.",
+                "source_statuses": {"access_control": {"status": "verified_present", "record_count": 99}},
                 "missing_sources": [],
-                "context_summary": "",
-                "has_conflicts": False,
+                "has_conflicts": True,  # contradicts evidence — ignored
                 "has_missing_sources": False,
+                "conflicts": [],
             }
         )
-        with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
+        result = svc._parse_and_validate("EVT-001", raw, ["access_control"], ev, source="orchestrate")
+        # Structural fields still come from authoritative engine, not LLM
+        assert result.source_statuses["access_control"].record_count == 1  # from evidence
+        assert result.has_conflicts is False  # from evidence, not LLM
 
-    def test_unknown_status_value_is_rejected(self):
-        svc = self._svc()
-        ev = _make_evidence()
-        raw = json.dumps(
-            {
-                "event_id": "EVT-001",
-                "source_statuses": {
-                    "access_control": {"status": "HACKED", "record_count": 99},
-                },
-                "conflicts": [],
-                "missing_sources": [],
-                "context_summary": "",
-                "has_conflicts": False,
-                "has_missing_sources": False,
-            }
-        )
-        with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
-
-    def test_oversized_context_summary_is_rejected(self):
+    def test_oversized_context_summary_is_truncated_to_1024(self):
+        """context_summary longer than 1024 chars is truncated, not rejected."""
         svc = self._svc()
         ev = _make_evidence()
         long_summary = "x" * 2000
-        raw = json.dumps(
-            {
-                "event_id": "EVT-001",
-                "source_statuses": {},
-                "conflicts": [],
-                "missing_sources": [],
-                "context_summary": long_summary,
-                "has_conflicts": False,
-                "has_missing_sources": False,
-            }
-        )
+        raw = json.dumps({"event_id": "EVT-001", "context_summary": long_summary})
         with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
-
-    def test_conflict_with_missing_fields_is_rejected(self):
-        svc = self._svc()
-        ev = _make_evidence()
-        raw = json.dumps(
-            {
-                "event_id": "EVT-001",
-                "source_statuses": {},
-                "conflicts": [
-                    {"source_a": "access_control"},  # missing source_b + description
-                    {
-                        "source_a": "schedule",
-                        "source_b": "work_orders",
-                        "description": "Valid conflict.",
-                    },
-                ],
-                "missing_sources": [],
-                "context_summary": "",
-                "has_conflicts": True,
-                "has_missing_sources": False,
-            }
-        )
-        with pytest.raises(ValueError, match="violated its contract"):
+            # Pydantic rejects > 1024 before we even truncate — that's correct.
             svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
 
     def test_non_json_raises_value_error(self):
@@ -427,27 +401,10 @@ class TestParseAndValidate:
 
     def test_markdown_fenced_json_stripped(self):
         svc = self._svc()
-        ev = _make_evidence()
+        ev = _make_evidence(access_events=_section_present(2))
         fenced = "```json\n" + self._minimal_valid_json() + "\n```"
         result = svc._parse_and_validate("EVT-001", fenced, [], ev, source="watsonx_ai")
-        assert "access_control" in result.source_statuses
-
-    def test_missing_sources_cannot_contradict_evidence(self):
-        svc = self._svc()
-        ev = _make_evidence()
-        raw = json.dumps(
-            {
-                "event_id": "EVT-001",
-                "source_statuses": {},
-                "conflicts": [],
-                "missing_sources": ["access_control"],
-                "context_summary": "",
-                "has_conflicts": False,
-                "has_missing_sources": True,
-            }
-        )
-        with pytest.raises(ValueError, match="missing_sources contradicted"):
-            svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
+        assert "Access records found" in result.context_summary
 
     def test_event_id_mismatch_is_rejected(self):
         svc = self._svc()
@@ -461,34 +418,28 @@ class TestParseAndValidate:
                 source="watsonx_ai",
             )
 
-    def test_record_count_cannot_contradict_evidence(self):
-        svc = self._svc()
-        ev = _make_evidence(access_events=_section_present(1))
-        with pytest.raises(ValueError, match="invalid count"):
-            svc._parse_and_validate(
-                "EVT-001",
-                self._minimal_valid_json(),
-                ["access_control"],
-                ev,
-                source="watsonx_ai",
-            )
-
-    def test_conflict_flags_cannot_contradict_evidence(self):
+    def test_missing_context_summary_key_is_rejected(self):
+        """LLM response must include context_summary."""
         svc = self._svc()
         ev = _make_evidence()
-        raw = json.dumps(
-            {
-                "event_id": "EVT-001",
-                "source_statuses": {},
-                "conflicts": [],
-                "missing_sources": [],
-                "context_summary": "",
-                "has_conflicts": True,
-                "has_missing_sources": False,
-            }
-        )
-        with pytest.raises(ValueError, match="has_conflicts contradicted"):
+        raw = json.dumps({"event_id": "EVT-001"})  # no context_summary
+        with pytest.raises(ValueError, match="violated its contract"):
             svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
+
+    def test_authoritative_statuses_reflect_evidence_not_llm(self):
+        """source_statuses come from evidence regardless of LLM output."""
+        svc = self._svc()
+        ev = _make_evidence(access_events=_section_present(3), schedule=_section_absent())
+        result = svc._parse_and_validate(
+            "EVT-001",
+            self._minimal_valid_json(),
+            ["access_control", "schedule"],
+            ev,
+            source="orchestrate",
+        )
+        assert result.source_statuses["access_control"].status == "verified_present"
+        assert result.source_statuses["access_control"].record_count == 3
+        assert result.source_statuses["schedule"].status == "verified_absent"
 
 
 # ---------------------------------------------------------------------------
@@ -576,21 +527,11 @@ class TestLLMPaths:
         return ContextService(session=None)
 
     def _valid_llm_response(self, event_id="EVT-001"):
+        """Minimal valid LLM response under the new narrow contract."""
         return json.dumps(
             {
                 "event_id": event_id,
-                "source_statuses": {
-                    "access_control": {
-                        "status": "verified_present",
-                        "record_count": 1,
-                        "summary": "One badge entry.",
-                    }
-                },
-                "conflicts": [],
-                "missing_sources": [],
                 "context_summary": "Access record found. No conflicts.",
-                "has_conflicts": False,
-                "has_missing_sources": False,
             }
         )
 

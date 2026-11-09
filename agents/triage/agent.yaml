@@ -19,10 +19,11 @@ description: >
   This agent does NOT make risk assessments, enforcement recommendations,
   or identity claims.  It only classifies and routes.
 
-llm: watsonx/ibm/granite-3-3-8b-instruct
-# default style: agent reads the user message and responds directly.
-# No tool calls are needed — the full event payload is supplied inline.
-style: default
+llm: watsonx/ibm/granite-4-h-small
+# react_intrinsic: responds directly without tool calls.
+# The full event payload is supplied inline by the backend.
+# granite-4-h-small used because granite-3-3-8b-instruct returns errors on this tenant.
+style: react_intrinsic
 collaborators: []
 tools: []
 
@@ -103,58 +104,8 @@ instructions: |
     "triage_rationale": "<one-sentence neutral explanation>"
   }
 
-structured_output:
-  type: object
-  additionalProperties: false
-  required:
-    - event_id
-    - category
-    - urgency_signals
-    - required_context
-    - triage_rationale
-  properties:
-    event_id:
-      type: string
-      minLength: 1
-      maxLength: 128
-    category:
-      type: string
-      enum:
-        - after_hours_presence
-        - restricted_area_access
-        - delivery_event
-        - authorized_access
-        - alarm_event
-        - vehicle_event
-        - unclassified
-    urgency_signals:
-      type: array
-      uniqueItems: true
-      items:
-        type: string
-        enum:
-          - after_hours
-          - restricted_zone
-          - forced_entry
-          - no_camera_coverage
-          - repeated_event
-          - low_detector_confidence
-          - missing_event_metadata
-    required_context:
-      type: array
-      uniqueItems: true
-      items:
-        type: string
-        enum:
-          - access_control
-          - schedule
-          - location_policy
-          - incident_history
-          - work_orders
-          - delivery_context
-          - visitor_context
-          - integration_health
-    triage_rationale:
-      type: string
-      minLength: 1
-      maxLength: 512
+# structured_output removed: Orchestrate's schema enforcement causes the
+# model to return a generic error when output doesn't exactly match the
+# schema, even when the JSON is valid. The backend _parse_and_validate()
+# method applies the same allowlist checks server-side, so enforcement
+# here is redundant and harmful.

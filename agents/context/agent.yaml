@@ -20,10 +20,10 @@ description: >
   enforcement decisions.
 
 llm: watsonx/ibm/granite-4-h-small
-# default style: agent reads the pre-gathered evidence package from the user
-# message directly. Tool calls are not needed — the backend supplies all
-# evidence inline before invoking Orchestrate.
-style: default
+# react_intrinsic: responds directly without tool calls.
+# The backend supplies all evidence inline before invoking Orchestrate.
+# (style: default is deprecated on this tenant and returns errors)
+style: react_intrinsic
 collaborators: []
 tools: []
 
@@ -113,83 +113,5 @@ instructions: |
     "has_missing_sources": <true|false>
   }
 
-structured_output:
-  type: object
-  additionalProperties: false
-  required:
-    - event_id
-    - source_statuses
-    - conflicts
-    - missing_sources
-    - context_summary
-    - has_conflicts
-    - has_missing_sources
-  properties:
-    event_id:
-      type: string
-      minLength: 1
-      maxLength: 128
-    source_statuses:
-      type: object
-      additionalProperties:
-        type: object
-        additionalProperties: false
-        required:
-          - status
-          - record_count
-          - summary
-        properties:
-          status:
-            type: string
-            enum:
-              - verified_present
-              - verified_absent
-              - unavailable
-              - not_requested
-          record_count:
-            type: integer
-            minimum: 0
-            nullable: true
-          summary:
-            type: string
-            maxLength: 256
-            nullable: true
-    conflicts:
-      type: array
-      items:
-        type: object
-        additionalProperties: false
-        required:
-          - source_a
-          - source_b
-          - description
-        properties:
-          source_a:
-            type: string
-            maxLength: 64
-          source_b:
-            type: string
-            maxLength: 64
-          description:
-            type: string
-            maxLength: 512
-    missing_sources:
-      type: array
-      items:
-        type: string
-        enum:
-          - access_control
-          - schedule
-          - location_policy
-          - incident_history
-          - work_orders
-          - delivery_context
-          - visitor_context
-          - integration_health
-    context_summary:
-      type: string
-      maxLength: 1024
-    has_conflicts:
-      type: boolean
-    has_missing_sources:
-      type: boolean
+# structured_output removed: see agents/triage/agent.yaml for rationale.
+# Backend context_service.py validates output against its own allowlists.

@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -167,7 +167,13 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # CORS
     # -------------------------------------------------------------------------
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # ``NoDecode`` lets the validator accept the documented comma-delimited
+    # environment form. Without it, pydantic-settings JSON-decodes list fields
+    # before ``mode="before"`` validators run, so a normal URL fails startup.
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
 
     @field_validator("cors_origins", mode="before")
     @classmethod

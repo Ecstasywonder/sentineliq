@@ -64,7 +64,7 @@ git status --short
 git rev-parse HEAD
 git fetch origin
 git rev-parse origin/main
-docker compose -f infra/docker/docker-compose.yml ps
+docker compose --env-file .env -f infra/docker/docker-compose.yml ps
 curl --fail --silent --show-error http://127.0.0.1:8000/health
 curl --fail --silent --show-error http://127.0.0.1:8000/ready
 ```

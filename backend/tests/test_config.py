@@ -50,6 +50,22 @@ def test_development_allows_local_defaults() -> None:
     assert settings.debug is False
 
 
+def test_cors_origins_accepts_comma_delimited_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        "https://console.example.com,https://review.example.com",
+    )
+
+    settings = Settings(_env_file=None, app_env="development")
+
+    assert settings.cors_origins == [
+        "https://console.example.com",
+        "https://review.example.com",
+    ]
+
+
 def test_production_rejects_simulator_api() -> None:
     with pytest.raises(ValidationError, match="ENABLE_SIMULATOR_API"):
         _production_settings(enable_simulator_api=True)

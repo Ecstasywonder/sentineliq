@@ -12,7 +12,9 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.9.0",
     "pydantic[email]>=2.9.0",
-    "pydantic-settings>=2.6.0",
+    # NoDecode is required so documented comma-delimited list settings reach
+    # their field validators instead of being JSON-decoded by the env source.
+    "pydantic-settings>=2.7.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "alembic>=1.14.0",
     "asyncpg>=0.30.0",

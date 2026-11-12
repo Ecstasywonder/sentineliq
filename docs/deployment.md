@@ -16,10 +16,15 @@ cp backend/.env.example backend/.env
 # Edit backend/.env — set SECRET_KEY at minimum:
 #   SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 
-# 3. Start services
-docker compose -f infra/docker/docker-compose.yml up -d
+# 3. Create the repository-root Compose interpolation file
+cp infra/docker/.env.example .env
+# Replace POSTGRES_PASSWORD in .env with a unique deployment secret.
 
-# 4. Verify health
+# 4. Start services. The explicit env file is required because the Compose
+# file lives below the repository root.
+docker compose --env-file .env -f infra/docker/docker-compose.yml up -d
+
+# 5. Verify health
 curl http://localhost:8000/health
 curl http://localhost:8000/ready
 ```
@@ -83,26 +88,26 @@ npm run build
 
 ```bash
 # Start all services
-docker compose -f infra/docker/docker-compose.yml up -d
+docker compose --env-file .env -f infra/docker/docker-compose.yml up -d
 
 # View logs
-docker compose -f infra/docker/docker-compose.yml logs -f backend
+docker compose --env-file .env -f infra/docker/docker-compose.yml logs -f backend
 
 # Stop all services
-docker compose -f infra/docker/docker-compose.yml down
+docker compose --env-file .env -f infra/docker/docker-compose.yml down
 
 # Stop and remove volumes (WARNING: deletes data)
-docker compose -f infra/docker/docker-compose.yml down -v
+docker compose --env-file .env -f infra/docker/docker-compose.yml down -v
 
 # Rebuild images
-docker compose -f infra/docker/docker-compose.yml build --no-cache
+docker compose --env-file .env -f infra/docker/docker-compose.yml build --no-cache
 ```
 
 ## Apply Database Migrations
 
 ```bash
 # Inside the backend container
-docker compose -f infra/docker/docker-compose.yml exec backend alembic upgrade head
+docker compose --env-file .env -f infra/docker/docker-compose.yml exec backend alembic upgrade head
 
 # Or directly on EC2 with venv active
 cd ~/sentineliq/backend

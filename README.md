@@ -181,16 +181,18 @@ chmod +x infra/docker/bootstrap-ec2.sh
 
 # 3. Configure environment
 cp backend/.env.example backend/.env
+cp infra/docker/.env.example .env
 # Edit backend/.env — set DATABASE_URL, SECRET_KEY, etc.
+# Edit .env — set a unique POSTGRES_PASSWORD for Compose interpolation.
 
 # 4. Start services
-docker compose -f infra/docker/docker-compose.yml up -d
+docker compose --env-file .env -f infra/docker/docker-compose.yml up -d
 
 # 5. Apply migrations
-docker compose -f infra/docker/docker-compose.yml exec backend alembic upgrade head
+docker compose --env-file .env -f infra/docker/docker-compose.yml exec backend alembic upgrade head
 
 # 6. Seed initial data (risk policy v1.0, 8 roles, demo facility)
-docker compose -f infra/docker/docker-compose.yml exec backend python -m app.db.seed
+docker compose --env-file .env -f infra/docker/docker-compose.yml exec backend python -m app.db.seed
 
 # 7. Verify
 curl http://localhost:8000/health

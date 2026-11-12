@@ -181,6 +181,7 @@ class TriageService:
         event_metadata: dict[str, Any],
         *,
         timeout: float | None = None,
+        force_deterministic: bool = False,
     ):
         """
         Triage a single security event.
@@ -196,9 +197,11 @@ class TriageService:
         safe_event_metadata = self._normalise_event_payload(event_id, event_metadata)
         attempt_records: list[dict[str, Any]] = []
         attempt_errors: list[str] = []
+        if force_deterministic:
+            attempt_errors.append("AI unavailable in trusted simulator scenario")
 
         # ---- PATH B: watsonx Orchestrate SaaS --------------------------------
-        if settings.orchestrate_active:
+        if settings.orchestrate_active and not force_deterministic:
             attempt_started = time.monotonic()
             try:
                 raw, tool_calls = await self._invoke_orchestrate_saas(
@@ -240,7 +243,7 @@ class TriageService:
                 )
 
         # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
-        if settings.watsonx_active:
+        if settings.watsonx_active and not force_deterministic:
             attempt_started = time.monotonic()
             try:
                 raw, tool_calls = await self._invoke_watsonx_ai(
@@ -284,7 +287,11 @@ class TriageService:
 
         # ---- PATH 0: Deterministic (always available) ------------------------
         duration_ms = (time.monotonic() - t0) * 1000
-        neither_configured = not settings.orchestrate_active and not settings.watsonx_active
+        neither_configured = (
+            not force_deterministic
+            and not settings.orchestrate_active
+            and not settings.watsonx_active
+        )
         path0_status = "skipped" if neither_configured else "failed_fallback"
 
         result = self._deterministic_triage(event_id, safe_event_metadata)

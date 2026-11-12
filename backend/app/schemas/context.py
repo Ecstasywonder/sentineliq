@@ -8,20 +8,7 @@ see what each evidence source found.
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
-
-ContextSourceName = Literal[
-    "access_control",
-    "schedule",
-    "location_policy",
-    "incident_history",
-    "work_orders",
-    "delivery_context",
-    "visitor_context",
-    "integration_health",
-]
 
 
 class SourceStatusRecord(BaseModel):
@@ -40,39 +27,19 @@ class EvidenceConflict(BaseModel):
     description: str
 
 
-class ContextAgentSourceStatus(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    status: Literal[
-        "verified_present",
-        "verified_absent",
-        "unavailable",
-        "not_requested",
-    ]
-    record_count: int | None = Field(default=None, ge=0)
-    summary: str | None = Field(default=None, max_length=256)
-
-
-class ContextAgentConflict(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    source_a: str = Field(min_length=1, max_length=64)
-    source_b: str = Field(min_length=1, max_length=64)
-    description: str = Field(min_length=1, max_length=512)
-
-
 class ContextAgentOutput(BaseModel):
-    """Strict contract accepted from an untrusted context agent."""
+    """Narrow contract accepted from an untrusted context agent.
 
-    model_config = ConfigDict(extra="forbid", strict=True)
+    The LLM is trusted only for ``context_summary`` — a two-sentence
+    operator-readable narrative.  All structural fields (source_statuses,
+    conflicts, missing_sources, flags) are derived from raw evidence by the
+    deterministic engine and cannot be overridden by the agent.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=False)
 
     event_id: str = Field(min_length=1, max_length=128)
-    source_statuses: dict[ContextSourceName, ContextAgentSourceStatus] = Field(max_length=8)
-    conflicts: list[ContextAgentConflict] = Field(max_length=20)
-    missing_sources: list[ContextSourceName] = Field(max_length=8)
     context_summary: str = Field(max_length=1024)
-    has_conflicts: bool
-    has_missing_sources: bool
 
 
 class ContextResult(BaseModel):

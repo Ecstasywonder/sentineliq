@@ -210,3 +210,134 @@ class AggregatedEvidence(BaseModel):
     knowledge_search: KnowledgeSearchResponse | None = None
     integration_health: IntegrationHealthResponse | None = None
     errors: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Event-bound, data-minimised Orchestrate tool responses
+# ---------------------------------------------------------------------------
+
+
+class AgentToolMeta(BaseModel):
+    event_id: str
+    source: str
+    record_count: int = Field(ge=0)
+    truncated: bool = False
+
+
+class AgentEventDetailResponse(BaseModel):
+    event_id: str
+    event_type: str
+    event_timestamp: str
+    location_id: str
+    facility_id: str | None = None
+    zone: str | None = None
+    detector_confidence: float | None = None
+    status: str
+
+
+class AgentCameraMetadataResponse(BaseModel):
+    """Minimal camera facts resolved only from the event's server-side scope."""
+
+    event_id: str
+    camera_id: str | None = None
+    metadata_status: str
+    location_id: str
+    facility_id: str | None = None
+    zone: str | None = None
+
+
+class AgentAccessFact(BaseModel):
+    access_type: str
+    access_granted: bool
+    occurred_at: str
+
+
+class AgentAccessResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentAccessFact]
+
+
+class AgentScheduleFact(BaseModel):
+    schedule_type: str
+    start_time: str
+    end_time: str
+    is_active: bool
+
+
+class AgentScheduleResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentScheduleFact]
+
+
+class AgentWorkOrderFact(BaseModel):
+    scheduled_start: str
+    scheduled_end: str
+    status: str
+    requires_after_hours: bool
+    approved: bool
+
+
+class AgentWorkOrdersResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentWorkOrderFact]
+
+
+class AgentDeliveryFact(BaseModel):
+    scheduled_start: str
+    scheduled_end: str
+    is_scheduled: bool
+
+
+class AgentDeliveryResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentDeliveryFact]
+
+
+class AgentPolicyFact(BaseModel):
+    rule_type: str
+    restricted_after: str | None = None
+    restricted_before: str | None = None
+    applies_to_zones: str | None = None
+    is_active: bool
+
+
+class AgentPolicyResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentPolicyFact]
+
+
+class AgentIncidentFact(BaseModel):
+    incident_type: str
+    severity: str
+    occurred_at: str
+    resolved: bool
+
+
+class AgentIncidentResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentIncidentFact]
+
+
+class AgentIntegrationFact(BaseModel):
+    source_id: str
+    status: str
+    last_successful_at: str | None = None
+    consecutive_failures: int = Field(ge=0)
+
+
+class AgentIntegrationResponse(BaseModel):
+    meta: AgentToolMeta
+    records: list[AgentIntegrationFact]
+
+
+class AgentAssessmentResponse(BaseModel):
+    event_id: str
+    event_status: str
+    risk_score: float
+    risk_level: str
+    risk_policy_version: str
+    confidence_score: float | None = None
+    confidence_level: str | None = None
+    summary: str = Field(default="", max_length=1024)
+    missing_evidence: list[str] = Field(default_factory=list)
+    human_review_required: bool = True

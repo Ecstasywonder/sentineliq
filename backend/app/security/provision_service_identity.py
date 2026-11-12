@@ -1,12 +1,14 @@
-"""Provision a least-privilege service identity and mint a short-lived token.
+"""Provision a least-privilege service identity.
 
 Example (run inside the backend runtime)::
 
     python -m app.security.provision_service_identity \
-      --purpose orchestrate_tools --token-file /run/secrets/orchestrate-tools.jwt
+      --purpose orchestrate_tools
 
-The token is never emitted to stdout or application logs. The destination must
-not already exist and is created with mode 0600.
+For integrations that cannot use OAuth client credentials, ``--token-file``
+can still mint a one-time short-lived token. The token is never emitted to
+stdout or application logs. The destination must not already exist and is
+created with mode 0600.
 """
 
 from __future__ import annotations
@@ -35,8 +37,8 @@ DEFAULT_EMAILS = {
 }
 
 
-async def provision_service_identity(purpose: str, email: str) -> tuple[str, str]:
-    """Upsert one purpose-bound identity and return its ID and signed token."""
+async def ensure_service_identity(purpose: str, email: str) -> str:
+    """Converge on the single least-privilege identity for ``purpose``."""
     if purpose not in SERVICE_PURPOSE_POLICIES:
         raise ValueError(f"Unknown service purpose: {purpose}")
     role_name, _ = SERVICE_PURPOSE_POLICIES[purpose]
@@ -48,7 +50,13 @@ async def provision_service_identity(purpose: str, email: str) -> tuple[str, str
             session.add(role)
             await session.flush()
 
-        user = await session.scalar(select(User).where(User.email == email.lower()))
+        user = await session.scalar(select(User).where(User.service_purpose == purpose))
+        if user is not None and user.email != email.lower():
+            raise ValueError(
+                f"Purpose {purpose!r} is already assigned to a different service identity"
+            )
+        if user is None:
+            user = await session.scalar(select(User).where(User.email == email.lower()))
         if user is None:
             user = User(
                 email=email.lower(),
@@ -91,7 +99,14 @@ async def provision_service_identity(purpose: str, email: str) -> tuple[str, str
         )
         await session.commit()
 
-        return user.id, create_service_access_token(user.id, [role_name], purpose)
+        return user.id
+
+
+async def provision_service_identity(purpose: str, email: str) -> tuple[str, str]:
+    """Compatibility helper that provisions an identity and mints a token."""
+    identity_id = await ensure_service_identity(purpose, email)
+    role_name, _ = SERVICE_PURPOSE_POLICIES[purpose]
+    return identity_id, create_service_access_token(identity_id, [role_name], purpose)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -101,8 +116,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--token-file",
         type=Path,
-        required=True,
-        help="New mode-0600 file that will receive the token (must not exist)",
+        help="Optional new mode-0600 file for a short-lived token (must not exist)",
     )
     return parser
 
@@ -110,7 +124,15 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _parser().parse_args()
     email = args.email or DEFAULT_EMAILS[args.purpose]
-    token_path: Path = args.token_file
+    token_path: Path | None = args.token_file
+    if token_path is None:
+        identity_id = asyncio.run(ensure_service_identity(args.purpose, email))
+        print(
+            f"Provisioned {args.purpose} identity {identity_id}",
+            file=sys.stderr,
+        )
+        return
+
     fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         identity_id, token = asyncio.run(provision_service_identity(args.purpose, email))

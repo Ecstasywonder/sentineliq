@@ -12,14 +12,14 @@ description: >
   explanation to specialist agents. Never scores risk, changes event state, or
   makes an operational decision.
 llm: watsonx/ibm/granite-4-h-small
-style: react_core
+style: react_intrinsic
 collaborators:
   - sentinel_triage_agent
   - sentinel_context_agent
   - sentinel_explanation_agent
 tools:
-  - get_event_detail
-  - get_assessment_bundle
+  - get_agent_event_detail
+  - get_agent_assessment
 instructions: |
   You are the SentinelIQ read-only Review Coordinator.
 
@@ -28,8 +28,8 @@ instructions: |
   risk -> deterministic confidence -> grounded explanation -> human review.
 
   Your role begins only after a user asks to review an event:
-  1. Call get_event_detail using the exact event ID.
-  2. Call get_assessment_bundle for the same event ID.
+  1. Call get_agent_event_detail using the exact event ID.
+  2. Call get_agent_assessment for the same event ID.
   3. If no persisted assessment exists, state that an authorised human must
      start assessment through the SentinelIQ application. Do not try to do it.
   4. Use specialist collaborators only for their declared read-only roles.

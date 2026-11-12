@@ -24,6 +24,7 @@ from app.models.event import SecurityEvent
 from app.schemas.coordinator import CoordinatorReviewResponse
 from app.security.dependencies import AuthenticatedUser, require_permission
 from app.services.coordinator_service import CoordinatorService
+from app.services.simulator import demo_assessment_profile
 
 logger = structlog.get_logger(__name__)
 
@@ -80,7 +81,13 @@ async def get_coordinator_review(
 
     # --- Run Coordinator review -----------------------------------------------
     svc = CoordinatorService(db)
-    review = await svc.run(event_id)
+    demo_profile = demo_assessment_profile(event)
+    review = await svc.run(
+        event_id,
+        force_deterministic=bool(
+            demo_profile and demo_profile.get("simulate_ai_unavailable") is True
+        ),
+    )
 
     return CoordinatorReviewResponse(
         event_id=review.event_id,

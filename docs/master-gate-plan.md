@@ -1,9 +1,9 @@
 # SentinelIQ — Master Gate Plan
 
-**Document ID:** SNTL-GATES-001  
-**Version:** 1.0  
-**Date:** 2026-11-03  
-**Author:** IBM Bob (Principal Architect)  
+**Document ID:** SNTL-GATES-001
+**Version:** 1.0
+**Date:** 2026-11-03
+**Author:** IBM Bob (Principal Architect)
 **Source of Truth:** [Master Build Prompt](master-build-prompt.md) and the
 [source-of-truth hierarchy](source-of-truth.md)
 
@@ -11,7 +11,7 @@
 
 ## How Gates Work
 
-Each gate has a defined scope, acceptance criteria, and a gate report document in `docs/`.  
+Each gate has a defined scope, acceptance criteria, and a gate report document in `docs/`.
 Gates are executed in order. No gate is considered complete until:
 1. All code is committed and pushed to `main`
 2. `ruff check` passes clean
@@ -30,7 +30,7 @@ an older report's gate number.
 |------|------|--------|----------|
 | **0** | Environment and source-of-truth validation | ✅ Complete | `docs/gate-0-environment-report.md` |
 | **1** | BRD, SOP, and architecture specification | ✅ Complete | `docs/sentinel-brd.md`, `docs/sentinel-sop.md`, `docs/architecture.md` |
-| **2** | Repository scaffold and developer foundation | 🟡 Candidate complete on EC2 — formatting and frontend quality checks now pass; strict completion awaits CI and merge to `main` | `docs/gate-14-16-completion.md`, `docs/deployment.md`, `.github/workflows/ci.yml` |
+| **2** | Repository scaffold and developer foundation | 🟡 EC2/CI-verified candidate — strict completion awaits merge to `main` | `docs/gate-14-16-completion.md`, `docs/deployment.md`, `.github/workflows/ci.yml` |
 | **3** | Database and domain model | ✅ Complete — mapped schema, migrations, core persistence repositories, seed framework, tests, and ER-equivalent documentation | `docs/data-model.md`, `backend/app/repositories/` |
 | **4** | Security-event simulator | ✅ Deterministic 19-scenario dataset, authenticated preview/persist API, validation, and idempotent seed behavior | `data/scenarios/mvp-scenarios.json`, `backend/app/services/simulator.py` |
 | **5** | Event ingestion and event queue backend | ✅ Complete | `docs/gate-5-event-ingestion-api.md` |
@@ -41,19 +41,19 @@ an older report's gate number.
 | **10** | Confidence engine | ✅ Complete | `docs/gate-4-risk-confidence-engines.md` |
 | **11** | Triage Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-14-triage-agent.md` (legacy Gate 14) |
 | **12** | Context Agent | ⚠️ Partial — service and tests exist; live Orchestrate integration is unverified | `docs/gate-15-context-agent.md` (legacy Gate 15) |
-| **13** | Explanation Agent | ✅ Complete — ExplanationService (3-path), grounded narrative, forbidden word filter, 40+ tests, wired into AssessmentService pipeline | `backend/tests/test_explanation_agent.py`, `docs/gate-14-16-completion.md` |
-| **14** | Coordinator and end-to-end agent workflow | ✅ Complete — CoordinatorService (2-path: Orchestrate + deterministic), `GET /events/{id}/review`, 37 tests, AgentRun persistence, read-only pattern enforced | `docs/gate-17-coordinator.md`, `backend/app/services/coordinator_service.py` |
+| **13** | Explanation Agent | 🟡 Candidate implementation — backend paths exist, but current live provider and CI/merge evidence remain outstanding | `backend/tests/test_explanation_agent.py`, `docs/gate-14-16-completion.md` |
+| **14** | Coordinator and end-to-end agent workflow | ⚠️ Partial — CoordinatorService and deterministic safe path exist; live watsonx Orchestrate import, tool/collaborator execution, structured output, and current CI/merge evidence are outstanding | `docs/gate-17-coordinator.md`, `docs/gate-14-16-handoff.md`, `backend/app/services/coordinator_service.py` |
 | **15** | Human-review workflow | ✅ Complete — decision, escalation, audit, and feedback APIs are implemented and tested | Legacy Gates 10–13 reports |
-| **16** | Operator dashboard foundation | ✅ Complete — app shell, auth, event queue, filters, pagination, navigation, event detail with full assessment overview; TypeScript + ESLint + build pass on EC2 | `frontend/src/App.tsx`, `frontend/src/api.ts` |
+| **16** | Operator dashboard foundation | 🟡 EC2/CI-verified candidate — app shell, auth, event queue, filters, pagination, navigation, and event detail pass current validation; merge evidence remains outstanding | `frontend/src/App.tsx`, `frontend/src/api.ts` |
 | **17** | Event decision interface | ✅ Complete — AgentPanel (triage/context), CoordinatorPanel (on-demand review), EscalationPanel, DecisionHistoryPanel, extended metadata; 26 frontend tests pass on EC2 | `frontend/src/App.tsx`, `docs/gate-17-frontend.md` |
 | **18** | Audit and history interface | ✅ Complete — `EventAuditPanel`, `EscalationDetailPanel`, `RiskPolicyPanel`, `AuditPage`, `DecisionHistoryPanel`, 13 unit tests, audit CSS | `docs/gate-18-audit-history.md`, `frontend/src/App.tsx` |
 | **19** | RBAC and administrative controls | ✅ Complete — admin API (7 routes), AdminPage, roles reference, 34 backend + 5 frontend tests, 608 backend tests pass, 90% coverage | `docs/gate-19-rbac-admin.md`, `backend/app/api/v1/endpoints/admin.py` |
 | **20** | Integration and failure-state hardening | ✅ Complete — 30 tests covering 9 failure scenarios; all architecture invariants verified; 638 backend + 39 frontend tests passing | `docs/gate-20-failure-hardening.md` |
 | **21** | Evaluation framework | ✅ Complete — 30-case dataset (all 26 MBP §35 categories), scorer, 106 pipeline + 15 unit tests, baseline report | `docs/gate-21-evaluation-framework.md` |
 | **22** | Security and adversarial testing | ✅ Complete — 782 backend tests and adversarial controls validated on EC2; strict dependency/secret/image checks and the required CI Gate passed; PR #2 merged as `4a9d8c0` | `docs/threat-model.md`, `docs/gate-22-ci-supply-chain.md` |
-| **23** | MVP usability and operator validation readiness | 🔲 Not started | — |
-| **24** | MVP release candidate | 🔲 Not started | — |
-| **25** | MVP demonstration and freeze | 🔲 Not started | — |
+| **23** | MVP usability and operator validation readiness | 🟡 EC2/CI-verified candidate — runner 73/73 and current quality gates pass at `993c0fe`; merge to `main` remains | `docs/gate-23-usability-demo-readiness.md`, `data/scenarios/mvp-scenarios.json`, `scripts/run_demo_scenarios.sh`, `frontend/src/test/demo_scenarios.test.tsx` |
+| **24** | MVP release candidate | 🟡 EC2/CI-verified candidate — backend/frontend/migrations, Gate 23, and 108/108 smoke checks pass; live Orchestrate evidence and merge remain | `docs/gate-24-release-candidate.md` |
+| **25** | MVP demonstration and freeze | 🔲 Pending — systemd Caddy is the intended HTTPS team path, subject to deployment verification; no demonstration or freeze evidence exists | `docs/gate-25-mvp-demonstration.md`, `infra/caddy/README.md` |
 | **26** | Production architecture ADRs | 🔲 Not started | — |
 | **27** | Provider adapter framework | 🔲 Not started | — |
 | **28** | Production event pipeline | 🔲 Not started | — |

@@ -21,6 +21,15 @@ class TokenResponse(BaseModel):
     expires_in: int  # access token lifetime in seconds
 
 
+class ServiceTokenResponse(BaseModel):
+    """OAuth2 client-credentials response for the Orchestrate tool identity."""
+
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+    scope: str = "tools:read"
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=1)
 

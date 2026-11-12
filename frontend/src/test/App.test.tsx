@@ -220,7 +220,10 @@ describe("App", () => {
         new Response(
           JSON.stringify({
             items: [
-              makeEvent({ event_type: "unauthorised_access", status: "awaiting_review" }),
+              makeEvent({
+                event_type: "unauthorised_access",
+                status: "awaiting_review",
+              }),
             ],
             total: 1,
             page: 1,
@@ -279,8 +282,16 @@ describe("App", () => {
     const secondResponse = new Promise<Response>((resolve) => {
       resolveSecond = resolve;
     });
-    const staleEvent = makeEvent({ id: "stale", event_type: "stale_event", status: "awaiting_review" });
-    const currentEvent = makeEvent({ id: "current", event_type: "current_event", status: "normalised" });
+    const staleEvent = makeEvent({
+      id: "stale",
+      event_type: "stale_event",
+      status: "awaiting_review",
+    });
+    const currentEvent = makeEvent({
+      id: "current",
+      event_type: "current_event",
+      status: "normalised",
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(loginMocks()[0])
@@ -312,7 +323,11 @@ describe("App", () => {
   // ── Gate 16: Event detail ───────────────────────────────────────────────
 
   it("opens an event detail view and makes assessment availability clear", async () => {
-    const event = makeEvent({ status: "normalised", risk: { score: null, level: null }, confidence: { score: null, level: null } });
+    const event = makeEvent({
+      status: "normalised",
+      risk: { score: null, level: null },
+      confidence: { score: null, level: null },
+    });
     vi.stubGlobal(
       "fetch",
       vi
@@ -320,28 +335,44 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ detail: "Assessment bundle not found." }), { status: 404 }),
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ detail: "Assessment bundle not found." }),
+            { status: 404 },
+          ),
         )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
     expect(
       await screen.findByRole("heading", { name: "unauthorised access" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run assessment" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Run assessment" }),
+    ).toBeInTheDocument();
   });
 
   it("shows extended metadata fields in the event detail view", async () => {
-    const event = makeEvent({ status: "normalised", risk: { score: null, level: null }, confidence: { score: null, level: null } });
+    const event = makeEvent({
+      status: "normalised",
+      risk: { score: null, level: null },
+      confidence: { score: null, level: null },
+    });
     vi.stubGlobal(
       "fetch",
       vi
@@ -349,9 +380,13 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ detail: "not found" }), { status: 404 }),
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ detail: "not found" }), {
+            status: 404,
+          }),
         )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
@@ -373,24 +408,37 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
-    expect(await screen.findByText(/Escalate to the shift supervisor/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Escalate to the shift supervisor/i),
+    ).toBeInTheDocument();
     expect(screen.getByText("Badge service status")).toBeInTheDocument();
     expect(screen.getByText("Decision timeline")).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "override" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "override" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows limitations when present in the explanation", async () => {
@@ -404,25 +452,40 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
-    expect(await screen.findByText("Schedule data may be incomplete.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Schedule data may be incomplete."),
+    ).toBeInTheDocument();
   });
 
   it("keeps assessment and decision controls hidden for read-only roles", async () => {
-    const event = makeEvent({ status: "normalised", risk: { score: null, level: null }, confidence: { score: null, level: null } });
+    const event = makeEvent({
+      status: "normalised",
+      risk: { score: null, level: null },
+      confidence: { score: null, level: null },
+    });
     vi.stubGlobal(
       "fetch",
       vi
@@ -430,20 +493,37 @@ describe("App", () => {
         .mockResolvedValueOnce(supervisorLoginMocks()[0])
         .mockResolvedValueOnce(
           new Response(
-            JSON.stringify({ id: "u1", email: "reviewer@example.com", full_name: "Reviewer", roles: ["audit_reviewer"], is_active: true }),
+            JSON.stringify({
+              id: "u1",
+              email: "reviewer@example.com",
+              full_name: "Reviewer",
+              roles: ["audit_reviewer"],
+              is_active: true,
+            }),
             { status: 200 },
           ),
         )
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ detail: "Assessment bundle not found." }), { status: 404 }),
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ detail: "Assessment bundle not found." }),
+            { status: 404 },
+          ),
         )
         // No assessment → DecisionHistoryPanel never mounts → no decisions fetch.
         // audit_reviewer has canAudit=true so EventAuditPanel mounts and calls getEventAudit.
         .mockResolvedValueOnce(
           new Response(
-            JSON.stringify({ items: [], total: 0, page: 1, page_size: 50, pages: 1 }),
+            JSON.stringify({
+              items: [],
+              total: 0,
+              page: 1,
+              page_size: 50,
+              pages: 1,
+            }),
             { status: 200 },
           ),
         ),
@@ -451,17 +531,24 @@ describe("App", () => {
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "reviewer@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "reviewer@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     expect(
       await screen.findByText(/cannot run assessments or record decisions/i),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Run assessment" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run assessment" }),
+    ).not.toBeInTheDocument();
   });
 
   // ── Gate 17: Agent activity panel ──────────────────────────────────────
@@ -477,25 +564,36 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     expect(await screen.findByText("Agent activity")).toBeInTheDocument();
     expect(screen.getByText("Triage result")).toBeInTheDocument();
     expect(screen.getByText("restricted area access")).toBeInTheDocument();
     expect(screen.getByText("Context result")).toBeInTheDocument();
-    expect(screen.getByText("No schedule entry found for this time window.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No schedule entry found for this time window."),
+    ).toBeInTheDocument();
   });
 
   it("hides Agent activity panel when assessment has no triage/context", async () => {
@@ -509,18 +607,27 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     await screen.findByRole("heading", { name: "unauthorised access" });
@@ -540,18 +647,27 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     expect(await screen.findByText("Coordinator review")).toBeInTheDocument();
@@ -580,26 +696,39 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse())
-        .mockResolvedValueOnce(new Response(JSON.stringify(coordinatorReview), { status: 200 })),
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(coordinatorReview), { status: 200 }),
+        ),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
     await user.click(
       await screen.findByRole("button", { name: "Request coordinator review" }),
     );
 
     expect(
-      await screen.findByText("Assessment is complete and ready for human review."),
+      await screen.findByText(
+        "Assessment is complete and ready for human review.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/human review required/i)).toBeInTheDocument();
   });
@@ -615,21 +744,32 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse())
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ detail: "Service unavailable" }), { status: 503 }),
+          new Response(JSON.stringify({ detail: "Service unavailable" }), {
+            status: 503,
+          }),
         ),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
     await user.click(
       await screen.findByRole("button", { name: "Request coordinator review" }),
@@ -640,7 +780,11 @@ describe("App", () => {
   });
 
   it("hides the Coordinator panel for non-reviewable event statuses", async () => {
-    const event = makeEvent({ status: "normalised", risk: { score: null, level: null }, confidence: { score: null, level: null } });
+    const event = makeEvent({
+      status: "normalised",
+      risk: { score: null, level: null },
+      confidence: { score: null, level: null },
+    });
 
     vi.stubGlobal(
       "fetch",
@@ -649,20 +793,29 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ detail: "not found" }), { status: 404 }),
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ detail: "not found" }), {
+            status: 404,
+          }),
         )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     await screen.findByRole("heading", { name: "unauthorised access" });
@@ -693,19 +846,30 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse())
-        .mockResolvedValueOnce(new Response(JSON.stringify(escalation), { status: 200 })),
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(escalation), { status: 200 }),
+        ),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     expect(await screen.findByText("Escalation")).toBeInTheDocument();
@@ -727,18 +891,27 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     await screen.findByText("Decision timeline");
@@ -751,7 +924,13 @@ describe("App", () => {
     const event = makeEvent();
     const assessment = makeAssessment();
     const decisions = [
-      { decision_id: "d1", event_id: "e1", decision: "escalate", rationale: "Needs supervisor review.", event_status: "escalated" },
+      {
+        decision_id: "d1",
+        event_id: "e1",
+        decision: "escalate",
+        rationale: "Needs supervisor review.",
+        event_status: "escalated",
+      },
     ];
 
     vi.stubGlobal(
@@ -761,21 +940,32 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse(decisions)),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
-    expect(await screen.findByText("Needs supervisor review.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Needs supervisor review."),
+    ).toBeInTheDocument();
   });
 
   it("shows 'No decisions' message when history is empty", async () => {
@@ -789,22 +979,33 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     expect(
-      await screen.findByText("No decisions have been recorded for this event."),
+      await screen.findByText(
+        "No decisions have been recorded for this event.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -822,7 +1023,10 @@ describe("App", () => {
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "supervisor@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -843,12 +1047,17 @@ describe("App", () => {
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     await screen.findByRole("button", { name: "Refresh queue" });
-    expect(screen.queryByRole("button", { name: "Audit trail" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Audit trail" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the audit trail page when Audit trail nav is clicked", async () => {
@@ -877,15 +1086,22 @@ describe("App", () => {
         .mockResolvedValueOnce(supervisorLoginMocks()[0])
         .mockResolvedValueOnce(supervisorLoginMocks()[1])
         .mockResolvedValueOnce(queueResponse([]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(auditResponse), { status: 200 })),
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(auditResponse), { status: 200 }),
+        ),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "supervisor@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    await user.click(await screen.findByRole("button", { name: "Audit trail" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Audit trail" }),
+    );
 
     expect(
       await screen.findByRole("heading", { name: "Audit trail", level: 1 }),
@@ -925,22 +1141,35 @@ describe("App", () => {
         .mockResolvedValueOnce(supervisorLoginMocks()[0])
         .mockResolvedValueOnce(supervisorLoginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse())
-        .mockResolvedValueOnce(new Response(JSON.stringify(auditResponse), { status: 200 })),
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(auditResponse), { status: 200 }),
+        ),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "supervisor@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
-    expect(await screen.findByText("Complete event audit trail")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Complete event audit trail"),
+    ).toBeInTheDocument();
     expect(await screen.findByText("risk assessed")).toBeInTheDocument();
   });
 
@@ -955,22 +1184,33 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     await screen.findByText("Decision timeline");
-    expect(screen.queryByText("Complete event audit trail")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Complete event audit trail"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows audit entry details when Show details is clicked", async () => {
@@ -1002,22 +1242,35 @@ describe("App", () => {
         .mockResolvedValueOnce(supervisorLoginMocks()[0])
         .mockResolvedValueOnce(supervisorLoginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse())
-        .mockResolvedValueOnce(new Response(JSON.stringify(auditResponse), { status: 200 })),
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(auditResponse), { status: 200 }),
+        ),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "supervisor@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "supervisor@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
-    const detailsBtn = await screen.findByRole("button", { name: "Show details" });
+    const detailsBtn = await screen.findByRole("button", {
+      name: "Show details",
+    });
     await user.click(detailsBtn);
     expect(screen.getByText(/Needs review/)).toBeInTheDocument();
   });
@@ -1033,30 +1286,54 @@ describe("App", () => {
       vi
         .fn()
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 900 }), { status: 200 }),
+          new Response(
+            JSON.stringify({
+              access_token: "a",
+              refresh_token: "r",
+              expires_in: 900,
+            }),
+            { status: 200 },
+          ),
         )
         .mockResolvedValueOnce(
           new Response(
-            JSON.stringify({ id: "u3", email: "admin@example.com", full_name: "Admin", roles: ["security_admin"], is_active: true }),
+            JSON.stringify({
+              id: "u3",
+              email: "admin@example.com",
+              full_name: "Admin",
+              roles: ["security_admin"],
+              is_active: true,
+            }),
             { status: 200 },
           ),
         )
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
-    expect(await screen.findByText("Risk-policy reference")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Risk-policy reference"),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Load policy details" }),
     ).toBeInTheDocument();
@@ -1073,18 +1350,27 @@ describe("App", () => {
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
         .mockResolvedValueOnce(queueResponse([event]))
-        .mockResolvedValueOnce(new Response(JSON.stringify(event), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(assessment), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(event), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(assessment), { status: 200 }),
+        )
         .mockResolvedValueOnce(decisionHistoryResponse()),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(
-      await screen.findByRole("button", { name: /open unauthorised_access event/i }),
+      await screen.findByRole("button", {
+        name: /open unauthorised_access event/i,
+      }),
     );
 
     await screen.findByText("Decision timeline");
@@ -1133,12 +1419,15 @@ describe("App", () => {
         .fn()
         .mockResolvedValueOnce(adminLoginMocks()[0])
         .mockResolvedValueOnce(adminLoginMocks()[1])
-        .mockResolvedValueOnce(queueResponse([]))
+        .mockResolvedValueOnce(queueResponse([])),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -1154,17 +1443,22 @@ describe("App", () => {
         .fn()
         .mockResolvedValueOnce(loginMocks()[0])
         .mockResolvedValueOnce(loginMocks()[1])
-        .mockResolvedValueOnce(queueResponse([]))
+        .mockResolvedValueOnce(queueResponse([])),
     );
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "operator@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "operator@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     await screen.findByRole("button", { name: "Refresh queue" });
-    expect(screen.queryByRole("button", { name: "Admin" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Admin" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders admin page with user list when Admin nav is clicked", async () => {
@@ -1191,7 +1485,10 @@ describe("App", () => {
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(await screen.findByRole("button", { name: "Admin" }));
@@ -1216,7 +1513,10 @@ describe("App", () => {
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(await screen.findByRole("button", { name: "Admin" }));
@@ -1237,7 +1537,10 @@ describe("App", () => {
 
     const user = userEvent.setup();
     renderApp();
-    await user.type(screen.getByLabelText("Email address"), "admin@example.com");
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await user.click(await screen.findByRole("button", { name: "Admin" }));

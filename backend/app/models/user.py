@@ -47,6 +47,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "service_purpose IN ('orchestrate_tools', 'event_ingestion')",
             name="ck_users_service_purpose",
         ),
+        UniqueConstraint("service_purpose", name="uq_users_service_purpose"),
     )
 
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)

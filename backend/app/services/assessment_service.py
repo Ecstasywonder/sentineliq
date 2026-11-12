@@ -47,6 +47,7 @@ from app.services.event_lifecycle import validate_transition
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.explanation_service import ExplanationService
 from app.services.risk_engine import FactorSignal, RiskEngine
+from app.services.simulator import demo_assessment_profile, demo_evidence_bundle
 from app.services.triage_service import TriageService
 
 logger = structlog.get_logger(__name__)
@@ -139,8 +140,16 @@ class AssessmentService:
             )
             return existing_response
 
+        # Gate 23 demo controls are server-owned and versioned.  Ordinary
+        # events and raw metadata cannot enable them.
+        demo_profile = demo_assessment_profile(event)
+        force_deterministic_agents = bool(
+            demo_profile and demo_profile.get("simulate_ai_unavailable") is True
+        )
+
         # ---- 0. Triage (Gate 14) — classify event, identify required context --
         triage_svc = TriageService(self._session)
+        agent_mode = {"force_deterministic": True} if force_deterministic_agents else {}
         triage_result = await triage_svc.run(
             event_id=event_id,
             event_metadata={
@@ -153,6 +162,7 @@ class AssessmentService:
                 "zone": event.zone,
                 "detector_confidence": event.detector_confidence,
             },
+            **agent_mode,
         )
 
         # Store agent_run_id on the event for traceability
@@ -160,12 +170,15 @@ class AssessmentService:
             event.agent_run_id = triage_result.agent_run_id
 
         # ---- 3. Gather evidence ---------------------------------------------
-        aggregator = EvidenceAggregator(self._session)
-        evidence = await aggregator.gather(
-            event_id,
-            event.location_id,
-            facility_id=event.facility_id,
-        )
+        if demo_profile is not None:
+            evidence = demo_evidence_bundle(event, demo_profile)
+        else:
+            aggregator = EvidenceAggregator(self._session)
+            evidence = await aggregator.gather(
+                event_id,
+                event.location_id,
+                facility_id=event.facility_id,
+            )
 
         # ---- 3b. Context Agent — interpret evidence (Gate 15) ---------------
         context_svc = ContextService(self._session)
@@ -180,10 +193,17 @@ class AssessmentService:
             },
             required_context=list(triage_result.required_context),
             evidence=evidence,
+            **agent_mode,
         )
 
         # ---- 4. Build risk signals from evidence ----------------------------
-        signals = self._build_signals(evidence, event)
+        normalized_evidence_errors = self._normalize_evidence_errors(evidence.errors)
+        unavailable_for_risk = extra_unavailable | set(normalized_evidence_errors)
+        signals = self._build_signals(
+            evidence,
+            event,
+            unavailable_source_ids=unavailable_for_risk,
+        )
 
         # ---- 5. Run Risk Engine (deterministic, no LLM) ---------------------
         engine = RiskEngine(self._session)
@@ -193,7 +213,6 @@ class AssessmentService:
         )
 
         # ---- 6. Build confidence source statuses ----------------------------
-        normalized_evidence_errors = self._normalize_evidence_errors(evidence.errors)
         sources = self._build_source_statuses(
             evidence,
             extra_unavailable,
@@ -207,6 +226,7 @@ class AssessmentService:
             has_contradictory_evidence=context_result.has_conflicts,
             incomplete_event_metadata=not bool(event.location_id),
             tool_retrieval_errors=tool_errors,
+            llm_unavailable=force_deterministic_agents,
         )
 
         # ---- 6b. Explanation Agent — grounded operator narrative (Gate 13) --
@@ -238,6 +258,7 @@ class AssessmentService:
             confidence_level=conf_result.confidence_level,
             evidence_errors=normalized_evidence_errors,
             evidence=evidence,
+            **agent_mode,
         )
 
         # ---- 7. Persist assessment rows -------------------------------------
@@ -549,7 +570,13 @@ class AssessmentService:
             assessed_at=risk_row.assessed_at,
         )
 
-    def _build_signals(self, evidence, event: SecurityEvent) -> list[FactorSignal]:
+    def _build_signals(
+        self,
+        evidence,
+        event: SecurityEvent,
+        *,
+        unavailable_source_ids: set[str] | None = None,
+    ) -> list[FactorSignal]:
         """
         Derive FactorSignal list from gathered evidence.
 
@@ -557,27 +584,64 @@ class AssessmentService:
         to a ``factor_id`` in the active RiskPolicy.  Unknown factor IDs are
         silently ignored by the RiskEngine (ADR-003).
 
-        Signals produced here (v1.0 policy factors):
-          after_hours_access   — access event outside business hours (naive: hour >= 20 or < 6)
-          unverified_person    — access_granted=False in any access event
-          no_work_order        — no active work order for this location
-          no_scheduled_entry   — no schedule entry covering this location
-          known_incident_area  — location has prior incidents in history
-          critical_zone        — security rule marks zone as restricted
+        Both the canonical seed-policy IDs and the legacy Gate 8 test-policy
+        IDs are emitted.  RiskEngine ignores IDs absent from the selected
+        policy, so this preserves backwards compatibility while ensuring the
+        deployed v1.0 policy actually receives its intended signals.
+
+        Absence-based signals are never triggered when their source is
+        unavailable.  Unknown evidence is uncertainty, not proof of absence.
         """
         signals: list[FactorSignal] = []
+        unavailable = unavailable_source_ids or set()
+
+        def source_available(*source_ids: str) -> bool:
+            return not any(source_id in unavailable for source_id in source_ids)
+
+        access_available = source_available("mock_access_control", "access_events")
+        schedule_available = source_available("mock_schedule", "schedule")
+        work_order_available = source_available("mock_work_order", "work_orders")
+        policy_available = source_available("db_security_rules", "location_policy")
+        incidents_available = source_available("db_incident_history", "incident_history")
+
+        access_records = list(evidence.access_events.records) if evidence.access_events else []
+        has_granted_access = access_available and any(r.access_granted for r in access_records)
+        has_denied_access = access_available and any(not r.access_granted for r in access_records)
+        has_schedule = bool(
+            schedule_available and evidence.schedule and evidence.schedule.meta.record_count > 0
+        )
+        has_work_order = bool(
+            work_order_available
+            and evidence.work_orders
+            and evidence.work_orders.meta.record_count > 0
+        )
+        has_incidents = bool(
+            incidents_available
+            and evidence.incident_history
+            and evidence.incident_history.meta.record_count > 0
+        )
+        is_restricted = False
+        if policy_available and evidence.location_policy and evidence.location_policy.records:
+            is_restricted = any(
+                r.rule_type
+                in (
+                    "after_hours_restriction",
+                    "access_restriction",
+                    "restricted_zone",
+                    "restricted_hours",
+                    "restricted_always",
+                )
+                for r in evidence.location_policy.records
+                if r.is_active
+            )
 
         # --- after_hours_access -----------------------------------------------
         after_hours = False
-        if evidence.access_events and evidence.access_events.records:
-            for rec in evidence.access_events.records:
-                try:
-                    hour = int(rec.occurred_at[11:13])  # "2026-11-03T22:00:00Z" → 22
-                    if hour >= 20 or hour < 6:
-                        after_hours = True
-                        break
-                except (ValueError, IndexError):
-                    pass
+        try:
+            hour = int(event.event_timestamp[11:13])
+            after_hours = hour >= 20 or hour < 6
+        except (ValueError, IndexError):
+            pass
         signals.append(
             FactorSignal(
                 factor_id="after_hours_access",
@@ -587,41 +651,33 @@ class AssessmentService:
         )
 
         # --- unverified_person -----------------------------------------------
-        unverified = False
-        if evidence.access_events and evidence.access_events.records:
-            unverified = any(not rec.access_granted for rec in evidence.access_events.records)
         signals.append(
             FactorSignal(
                 factor_id="unverified_person",
-                triggered=unverified,
+                triggered=has_denied_access,
                 source="access_events",
             )
         )
 
         # --- no_work_order ---------------------------------------------------
-        has_work_order = bool(evidence.work_orders and evidence.work_orders.meta.record_count > 0)
         signals.append(
             FactorSignal(
                 factor_id="no_work_order",
-                triggered=not has_work_order,
+                triggered=work_order_available and not has_work_order,
                 source="work_orders",
             )
         )
 
         # --- no_scheduled_entry ---------------------------------------------
-        has_schedule = bool(evidence.schedule and evidence.schedule.meta.record_count > 0)
         signals.append(
             FactorSignal(
                 factor_id="no_scheduled_entry",
-                triggered=not has_schedule,
+                triggered=schedule_available and not has_schedule,
                 source="schedule",
             )
         )
 
         # --- known_incident_area --------------------------------------------
-        has_incidents = bool(
-            evidence.incident_history and evidence.incident_history.meta.record_count > 0
-        )
         signals.append(
             FactorSignal(
                 factor_id="known_incident_area",
@@ -631,19 +687,54 @@ class AssessmentService:
         )
 
         # --- critical_zone --------------------------------------------------
-        is_restricted = False
-        if evidence.location_policy and evidence.location_policy.records:
-            is_restricted = any(
-                r.rule_type in ("after_hours_restriction", "access_restriction", "restricted_zone")
-                for r in evidence.location_policy.records
-                if r.is_active
-            )
         signals.append(
             FactorSignal(
                 factor_id="critical_zone",
                 triggered=is_restricted,
                 source="location_policy",
             )
+        )
+
+        # Canonical v1.0 policy signals (mirrors app.db.seed.RISK_FACTORS).
+        identity_event = event.event_type in {"person_detected", "badge_event"}
+        signals.extend(
+            [
+                FactorSignal(
+                    factor_id="no_matching_badge",
+                    triggered=(identity_event and access_available and not has_granted_access),
+                    source="access_events",
+                ),
+                FactorSignal(
+                    factor_id="outside_schedule",
+                    triggered=schedule_available and not has_schedule,
+                    source="schedule",
+                ),
+                FactorSignal(
+                    factor_id="restricted_area",
+                    triggered=is_restricted,
+                    source="location_policy",
+                ),
+                FactorSignal(
+                    factor_id="recent_incidents",
+                    triggered=has_incidents,
+                    source="incident_history",
+                ),
+                FactorSignal(
+                    factor_id="forced_door_alarm",
+                    triggered=event.event_type in {"door_forced", "alarm_triggered"},
+                    source="event",
+                ),
+                FactorSignal(
+                    factor_id="approved_maintenance",
+                    triggered=identity_event and has_work_order,
+                    source="work_orders",
+                ),
+                FactorSignal(
+                    factor_id="valid_access_schedule",
+                    triggered=has_granted_access and has_schedule,
+                    source="access_events,schedule",
+                ),
+            ]
         )
 
         return signals

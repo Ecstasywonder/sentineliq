@@ -87,17 +87,6 @@ instructions: |
     "context_summary": "<two sentences max — neutral factual summary>"
   }
 
-structured_output:
-  type: object
-  additionalProperties: false
-  required:
-    - event_id
-    - context_summary
-  properties:
-    event_id:
-      type: string
-      minLength: 1
-      maxLength: 128
-    context_summary:
-      type: string
-      maxLength: 1024
+# ReAct Core does not support Orchestrate's native structured_output
+# enforcement. The exact response schema is defined in the instructions above
+# and is enforced again by ContextAgentOutput in the backend trust boundary.

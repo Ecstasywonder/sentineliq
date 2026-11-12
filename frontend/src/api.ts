@@ -450,13 +450,10 @@ export const getGlobalAudit = (page = 1, action = "", actor = "") => {
   return request<AuditList>(`/audit?${params}`);
 };
 
-export const getRiskPolicies = () =>
-  request<RiskPolicyList>("/risk-policies");
+export const getRiskPolicies = () => request<RiskPolicyList>("/risk-policies");
 
 export const getRiskPolicy = (policyId: string) =>
-  request<RiskPolicyDetail>(
-    `/risk-policies/${encodeURIComponent(policyId)}`,
-  );
+  request<RiskPolicyDetail>(`/risk-policies/${encodeURIComponent(policyId)}`);
 
 export const getEventEscalationDetail = (eventId: string) =>
   request<EscalationDetail>(

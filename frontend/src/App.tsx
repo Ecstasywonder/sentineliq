@@ -193,8 +193,8 @@ function AuditTrailList({
           <h2>{title}</h2>
           {data && (
             <p>
-              {data.total} entr{data.total === 1 ? "y" : "ies"} · page {page}{" "}
-              of {data.pages}
+              {data.total} entr{data.total === 1 ? "y" : "ies"} · page {page} of{" "}
+              {data.pages}
             </p>
           )}
         </div>
@@ -263,10 +263,7 @@ function EventAuditPanel({
   eventId: string;
   canAudit: boolean;
 }): React.JSX.Element | null {
-  const load = useCallback(
-    (p: number) => getEventAudit(eventId, p),
-    [eventId],
-  );
+  const load = useCallback((p: number) => getEventAudit(eventId, p), [eventId]);
   if (!canAudit) return null;
   return (
     <section className="panel" aria-labelledby="audit-panel-title">
@@ -464,9 +461,7 @@ function RiskPolicyPanel({
                   <li key={f.factor_id}>
                     <span>
                       {f.label}
-                      {f.description && (
-                        <small> — {f.description}</small>
-                      )}
+                      {f.description && <small> — {f.description}</small>}
                     </span>
                     <strong>
                       {f.direction === "increase" ? "+" : "−"}
@@ -1746,7 +1741,10 @@ function AdminPage(): React.JSX.Element {
         {usersError && (
           <div className="error-panel" role="alert">
             <p>{usersError}</p>
-            <button className="secondary" onClick={() => void loadUsers(usersPage)}>
+            <button
+              className="secondary"
+              onClick={() => void loadUsers(usersPage)}
+            >
               Try again
             </button>
           </div>
@@ -1780,17 +1778,23 @@ function AdminPage(): React.JSX.Element {
                     <td>{u.email}</td>
                     <td>
                       <div className="role-pills">
-                        {u.roles.length > 0
-                          ? u.roles.map((r) => (
-                              <span key={r} className="audit-role">
-                                {humanize(r)}
-                              </span>
-                            ))
-                          : <span className="admin-muted">No roles</span>}
+                        {u.roles.length > 0 ? (
+                          u.roles.map((r) => (
+                            <span key={r} className="audit-role">
+                              {humanize(r)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="admin-muted">No roles</span>
+                        )}
                       </div>
                     </td>
                     <td>
-                      <span className={u.is_active ? "admin-active" : "admin-inactive"}>
+                      <span
+                        className={
+                          u.is_active ? "admin-active" : "admin-inactive"
+                        }
+                      >
                         {u.is_active ? "Active" : "Inactive"}
                       </span>
                     </td>
@@ -1979,7 +1983,12 @@ export default function App(): React.JSX.Element {
           roles={user.roles}
         />
       ) : (
-        <EventQueue onOpen={(id) => { setSelectedEventId(id); setPage("queue"); }} />
+        <EventQueue
+          onOpen={(id) => {
+            setSelectedEventId(id);
+            setPage("queue");
+          }}
+        />
       )}
     </div>
   );

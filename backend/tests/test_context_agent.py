@@ -315,7 +315,9 @@ class TestParseAndValidate:
     def _svc(self):
         return ContextService(session=None)
 
-    def _minimal_valid_json(self, event_id="EVT-001", summary="Access records found. No conflicts."):
+    def _minimal_valid_json(
+        self, event_id="EVT-001", summary="Access records found. No conflicts."
+    ):
         """Minimal valid LLM response under the new narrow contract."""
         return json.dumps({"event_id": event_id, "context_summary": summary})
 
@@ -371,14 +373,18 @@ class TestParseAndValidate:
             {
                 "event_id": "EVT-001",
                 "context_summary": "One record found.",
-                "source_statuses": {"access_control": {"status": "verified_present", "record_count": 99}},
+                "source_statuses": {
+                    "access_control": {"status": "verified_present", "record_count": 99}
+                },
                 "missing_sources": [],
                 "has_conflicts": True,  # contradicts evidence — ignored
                 "has_missing_sources": False,
                 "conflicts": [],
             }
         )
-        result = svc._parse_and_validate("EVT-001", raw, ["access_control"], ev, source="orchestrate")
+        result = svc._parse_and_validate(
+            "EVT-001", raw, ["access_control"], ev, source="orchestrate"
+        )
         # Structural fields still come from authoritative engine, not LLM
         assert result.source_statuses["access_control"].record_count == 1  # from evidence
         assert result.has_conflicts is False  # from evidence, not LLM

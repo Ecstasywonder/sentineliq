@@ -14,12 +14,7 @@ from app.models.user import User
 
 
 def _migration():
-    path = (
-        Path(__file__).parents[1]
-        / "alembic"
-        / "versions"
-        / "0006_unique_service_purpose.py"
-    )
+    path = Path(__file__).parents[1] / "alembic" / "versions" / "0006_unique_service_purpose.py"
     spec = importlib.util.spec_from_file_location("unique_service_purpose", path)
     assert spec is not None
     assert spec.loader is not None
@@ -40,7 +35,7 @@ def test_migration_is_linear_and_adds_unique_purpose(monkeypatch) -> None:
     migration.upgrade()
 
     assert migration.down_revision == "0005_security_audit"
-    assert calls == [(('uq_users_service_purpose', 'users', ['service_purpose']), {})]
+    assert calls == [(("uq_users_service_purpose", "users", ["service_purpose"]), {})]
 
 
 @pytest.mark.asyncio

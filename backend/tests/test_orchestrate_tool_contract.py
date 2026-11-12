@@ -88,9 +88,9 @@ def test_every_generated_tool_requires_authentication() -> None:
     module = _generator_module()
     contract = module.build_tool_spec("https://sentineliq.example.test")
     for path, path_item in contract["paths"].items():
-        assert path_item["get"].get("security") == [
-            {module.OAUTH_SCHEME_NAME: ["tools:read"]}
-        ], f"Tool route has the wrong auth scope: {path}"
+        assert path_item["get"].get("security") == [{module.OAUTH_SCHEME_NAME: ["tools:read"]}], (
+            f"Tool route has the wrong auth scope: {path}"
+        )
 
         parameters = path_item["get"].get("parameters", [])
         assert [parameter["name"] for parameter in parameters] == ["event_id"]
@@ -104,9 +104,7 @@ def test_every_generated_tool_requires_authentication() -> None:
             ),
             "flows": {
                 "clientCredentials": {
-                    "tokenUrl": (
-                        "https://sentineliq.example.test/api/v1/auth/service-token"
-                    ),
+                    "tokenUrl": ("https://sentineliq.example.test/api/v1/auth/service-token"),
                     "scopes": {"tools:read": "Read redacted, event-bound evidence"},
                 }
             },

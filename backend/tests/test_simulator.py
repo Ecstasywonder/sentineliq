@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints import simulator as simulator_endpoints
 from app.models.event import SecurityEvent
 from app.models.incident import IncidentHistory
 from app.repositories.events import IncidentRepository, SecurityEventRepository
@@ -20,7 +21,6 @@ from app.services.simulator import (
     persist_scenarios,
     select_scenarios,
 )
-from app.api.v1.endpoints import simulator as simulator_endpoints
 
 _CANONICAL_RISK_WEIGHTS = {
     "no_matching_badge": 25.0,
@@ -159,9 +159,7 @@ async def test_demo_profiles_drive_claimed_canonical_risk(
     )
     triggered = {signal.factor_id for signal in signals if signal.triggered}
     score = sum(
-        weight
-        for factor_id, weight in _CANONICAL_RISK_WEIGHTS.items()
-        if factor_id in triggered
+        weight for factor_id, weight in _CANONICAL_RISK_WEIGHTS.items() if factor_id in triggered
     )
     score = max(0.0, min(200.0, score))
     if score >= 75:

@@ -283,9 +283,10 @@ class Settings(BaseSettings):
                 "ORCHESTRATE_TOOLS_CLIENT_ID and ORCHESTRATE_TOOLS_CLIENT_SECRET "
                 "must be configured together"
             )
-        if self.orchestrate_tools_client_id and not 3 <= len(
+        if (
             self.orchestrate_tools_client_id
-        ) <= 128:
+            and not 3 <= len(self.orchestrate_tools_client_id) <= 128
+        ):
             raise ValueError("ORCHESTRATE_TOOLS_CLIENT_ID must be 3 to 128 characters")
         if oauth_secret and len(oauth_secret) < 32:
             raise ValueError("ORCHESTRATE_TOOLS_CLIENT_SECRET must be at least 32 characters")

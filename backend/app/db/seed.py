@@ -100,14 +100,11 @@ def _load_interactive_seed_accounts(
 
         if not enabled:
             configured_fields = [
-                name
-                for name, value in ((email_name, email), (password_name, password))
-                if value
+                name for name, value in ((email_name, email), (password_name, password)) if value
             ]
             if configured_fields:
                 raise RuntimeError(
-                    f"{enabled_name} must be true when configuring "
-                    + ", ".join(configured_fields)
+                    f"{enabled_name} must be true when configuring " + ", ".join(configured_fields)
                 )
             continue
 

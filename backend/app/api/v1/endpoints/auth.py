@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from typing import Annotated
 from datetime import UTC, datetime
+from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, Response, status

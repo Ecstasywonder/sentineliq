@@ -148,9 +148,7 @@ def test_production_orchestrate_requires_tools_oauth_credentials() -> None:
         ),
         orchestrate_api_key="secret",
         orchestrate_tools_client_id="sentineliq-tools",
-        orchestrate_tools_client_secret=(
-            "service-client-secret-longer-than-thirty-two-characters"
-        ),
+        orchestrate_tools_client_secret=("service-client-secret-longer-than-thirty-two-characters"),
         **agent_ids,
     )
     assert settings.orchestrate_tools_oauth_configured is True

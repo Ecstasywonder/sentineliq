@@ -739,12 +739,10 @@ async def get_agent_location_policy(
         select(SecurityRule)
         .where(SecurityRule.is_active.is_(True))
         .where(
-            (SecurityRule.location_id == event.location_id)
-            | (SecurityRule.location_id.is_(None))
+            (SecurityRule.location_id == event.location_id) | (SecurityRule.location_id.is_(None))
         )
         .where(
-            (SecurityRule.facility_id == event.facility_id)
-            | (SecurityRule.facility_id.is_(None))
+            (SecurityRule.facility_id == event.facility_id) | (SecurityRule.facility_id.is_(None))
         )
         .limit(_AGENT_MAX_RECORDS)
     )

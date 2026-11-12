@@ -534,9 +534,7 @@ class TestAgentToolFacades:
         event = await _seed_event(db_session, _LOC)
         await _seed_incident(db_session, _LOC)
 
-        response = await client.get(
-            f"/api/v1/tools/agent/incident-history?event_id={event.id}"
-        )
+        response = await client.get(f"/api/v1/tools/agent/incident-history?event_id={event.id}")
 
         assert response.status_code == 200
         assert response.json()["meta"]["record_count"] == 1
@@ -550,7 +548,5 @@ class TestAgentToolFacades:
         assert "Badge swipe" not in response.text
 
     async def test_agent_tools_reject_unknown_event(self, client: AsyncClient) -> None:
-        response = await client.get(
-            "/api/v1/tools/agent/integration-health?event_id=missing-event"
-        )
+        response = await client.get("/api/v1/tools/agent/integration-health?event_id=missing-event")
         assert response.status_code == 404

@@ -58,13 +58,9 @@ def load_scenarios() -> list[dict[str, Any]]:
                 raise ValueError(f"Scenario {scenario['id']} has an invalid demo profile.")
             for key, allowed in _DEMO_PROFILE_VALUES.items():
                 if profile.get(key) not in allowed:
-                    raise ValueError(
-                        f"Scenario {scenario['id']} demo profile has invalid {key}."
-                    )
+                    raise ValueError(f"Scenario {scenario['id']} demo profile has invalid {key}.")
             if not isinstance(profile.get("simulate_ai_unavailable", False), bool):
-                raise ValueError(
-                    f"Scenario {scenario['id']} demo profile has invalid AI control."
-                )
+                raise ValueError(f"Scenario {scenario['id']} demo profile has invalid AI control.")
     return scenarios
 
 

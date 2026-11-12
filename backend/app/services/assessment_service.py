@@ -608,9 +608,7 @@ class AssessmentService:
         has_granted_access = access_available and any(r.access_granted for r in access_records)
         has_denied_access = access_available and any(not r.access_granted for r in access_records)
         has_schedule = bool(
-            schedule_available
-            and evidence.schedule
-            and evidence.schedule.meta.record_count > 0
+            schedule_available and evidence.schedule and evidence.schedule.meta.record_count > 0
         )
         has_work_order = bool(
             work_order_available
@@ -703,9 +701,7 @@ class AssessmentService:
             [
                 FactorSignal(
                     factor_id="no_matching_badge",
-                    triggered=(
-                        identity_event and access_available and not has_granted_access
-                    ),
+                    triggered=(identity_event and access_available and not has_granted_access),
                     source="access_events",
                 ),
                 FactorSignal(

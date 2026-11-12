@@ -122,6 +122,7 @@ def test_connection_contract_configures_draft_and_live_runtime_environments() ->
     for environment in connection["environments"].values():
         assert environment == {
             "security_scheme": "oauth2",
+            "auth_type": "oauth2_client_creds",
             "type": "team",
             "server_url": "__SENTINELIQ_API_BASE_URL__",
         }

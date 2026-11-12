@@ -39,7 +39,7 @@ host used by the site block.
    reload when making a change):
 
    ```sh
-   sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+   sudo sh -c '. /etc/sentineliq/caddy.env; export SENTINELIQ_PUBLIC_HOST; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile'
    sudo systemctl enable --now caddy
    curl --fail --silent --show-error https://api.example.com/health
    curl --silent --output /dev/null --write-out '%{http_code}\\n' https://api.example.com/ready

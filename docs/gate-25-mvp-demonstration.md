@@ -26,7 +26,8 @@ separate network:
 
 ```bash
 curl --fail --silent --show-error https://<verified-sentineliq-public-host>/health
-curl --fail --silent --show-error https://<verified-sentineliq-public-host>/ready
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  https://<verified-sentineliq-public-host>/ready)" = 404
 ```
 
 Do not expose container ports 3000, 5432, or 8000 directly. Caddy is the only
@@ -75,18 +76,13 @@ database.
 ## Demonstration flow
 
 1. Sign in with the demonstrator’s individually provisioned account.
-2. Generate one scenario through the authenticated simulator endpoint:
+2. Select an event created through the authorized event-ingestion workflow.
+   Production startup rejects `ENABLE_SIMULATOR_API=true`, so do not expose or
+   enable the simulator on the team deployment. If a canonical scenario is
+   needed, prepare it in a separate controlled non-production environment and
+   carry only its sanitized result into the demonstration record.
 
-   ```bash
-   curl --fail --silent --show-error \
-     -X POST https://<verified-sentineliq-public-host>/api/v1/simulator/generate \
-     -H "Authorization: Bearer <access-token>" \
-     -H "Content-Type: application/json" \
-     -d '{"scenario_ids":["demo-scenario-b"],"persist":true}'
-   ```
-
-3. Take the event identifier from `events[0].persisted_event_id`, then assess
-   it using `POST /api/v1/events/{id}/assess`.
+3. Assess the selected event using `POST /api/v1/events/{id}/assess`.
 4. In the dashboard, review risk, confidence, evidence limitations, explanation,
    recommendation, and human-review requirement.
 5. Record an authorized human decision and confirm its audit entry.
@@ -114,8 +110,8 @@ operator demonstration occurs:
 | End-to-end assessment | Event ID and sanitized outcome | Pending |
 | Live Orchestrate workflow | Sanitized AgentRun/tool evidence | Pending |
 | Human decision and immutable audit | Event ID and audit record | Pending |
-| Gate 23 runner | Current EC2 result | Pending |
-| Release CI | Required GitHub Actions run URL | Pending |
+| Gate 23 runner | 73/73 assertions at candidate `993c0fe`; repeat only if candidate changes materially | Candidate passed |
+| Release CI | Actions run `43232697244` for `993c0fe`; final merged SHA still required | Candidate passed |
 | Operator scope-freeze approval | Named approval and date | Pending |
 
 After explicit operator approval, freeze MVP scope. Any urgent correction before

@@ -2,7 +2,8 @@
 Gate 7 — Context Tool endpoints.
 
 All endpoints are read-only (ADR-005) and require the ``tools:read`` permission.
-They mirror the seven tools available to the watsonx Orchestrate agents.
+They include the human-facing evidence APIs plus compact event-bound façades
+available to watsonx Orchestrate agents.
 
 Routes
 ------
@@ -39,6 +40,24 @@ from app.schemas.knowledge import KnowledgeSearchResponse
 from app.schemas.tools import (
     AccessEventRecord,
     AccessEventsResponse,
+    AgentAccessFact,
+    AgentAccessResponse,
+    AgentAssessmentResponse,
+    AgentCameraMetadataResponse,
+    AgentDeliveryFact,
+    AgentDeliveryResponse,
+    AgentEventDetailResponse,
+    AgentIncidentFact,
+    AgentIncidentResponse,
+    AgentIntegrationFact,
+    AgentIntegrationResponse,
+    AgentPolicyFact,
+    AgentPolicyResponse,
+    AgentScheduleFact,
+    AgentScheduleResponse,
+    AgentToolMeta,
+    AgentWorkOrderFact,
+    AgentWorkOrdersResponse,
     DeliveryRecord,
     DeliveryResponse,
     IncidentHistoryResponse,
@@ -53,13 +72,18 @@ from app.schemas.tools import (
     WorkOrderRecord,
     WorkOrdersResponse,
 )
-from app.security.dependencies import require_permission
+from app.security.dependencies import get_current_human_user, require_permission
 from app.services.knowledge_retrieval import KnowledgeRetrievalService
 
 router = APIRouter()
 
 _PERM = "tools:read"
 _MAX_LIMIT = 200
+_AGENT_MAX_RECORDS = 20
+_HUMAN_TOOL_DEPENDENCIES = [
+    Depends(require_permission(_PERM)),
+    Depends(get_current_human_user),
+]
 
 
 def _json_object(raw: str | None) -> dict:
@@ -103,7 +127,7 @@ def _json_string_list(raw: str | None) -> list[str]:
     operation_id="get_assessment_bundle",
     response_model=AssessmentBundleResponse,
     summary="Retrieve the persisted assessment reconstruction bundle",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_assessment_bundle(
     event_id: str = Query(..., max_length=36),
@@ -166,7 +190,7 @@ async def get_assessment_bundle(
     operation_id="get_access_events",
     response_model=AccessEventsResponse,
     summary="Badge / access-control events for a location",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_access_events(
     location_id: str = Query(..., description="Location identifier to filter by"),
@@ -197,7 +221,7 @@ async def get_access_events(
     operation_id="get_schedule",
     response_model=ScheduleResponse,
     summary="Schedule context for a location or facility",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_schedule(
     location_id: str | None = Query(None),
@@ -231,7 +255,7 @@ async def get_schedule(
     operation_id="get_work_orders",
     response_model=WorkOrdersResponse,
     summary="Active work orders for a location",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_work_orders(
     location_id: str = Query(..., description="Location identifier to filter by"),
@@ -265,7 +289,7 @@ async def get_work_orders(
     operation_id="get_delivery",
     response_model=DeliveryResponse,
     summary="Delivery schedule for a location",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_delivery(
     location_id: str = Query(..., description="Location identifier to filter by"),
@@ -296,7 +320,7 @@ async def get_delivery(
     operation_id="get_location_policy",
     response_model=LocationPolicyResponse,
     summary="Active security rules for a location",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_location_policy(
     location_id: str = Query(..., description="Location identifier"),
@@ -346,7 +370,7 @@ async def get_location_policy(
     operation_id="get_incident_history",
     response_model=IncidentHistoryResponse,
     summary="Historical security incidents at a location",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_incident_history(
     location_id: str = Query(..., description="Location identifier"),
@@ -400,7 +424,7 @@ async def get_incident_history(
     operation_id="search_knowledge",
     response_model=KnowledgeSearchResponse,
     summary="Hybrid semantic and metadata search over incidents and policies",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def search_knowledge(
     q: str = Query(..., min_length=2, max_length=500, description="Natural-language query"),
@@ -447,7 +471,7 @@ async def search_knowledge(
     operation_id="get_integration_health",
     response_model=IntegrationHealthResponse,
     summary="Adapter health status for all evidence sources",
-    dependencies=[Depends(require_permission(_PERM))],
+    dependencies=_HUMAN_TOOL_DEPENDENCIES,
 )
 async def get_integration_health(
     session: AsyncSession = Depends(get_db),
@@ -485,4 +509,374 @@ async def get_integration_health(
     return IntegrationHealthResponse(
         meta=ToolMeta(source="aggregator", record_count=len(records)),
         records=records,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Event-bound Orchestrate façades
+# ---------------------------------------------------------------------------
+
+
+async def _agent_event(event_id: str, session: AsyncSession) -> SecurityEvent:
+    """Resolve the immutable server-side scope for every agent tool call."""
+    event = await session.get(SecurityEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    return event
+
+
+def _agent_meta(
+    event_id: str,
+    source: str,
+    count: int,
+    *,
+    limit: int = _AGENT_MAX_RECORDS,
+) -> AgentToolMeta:
+    return AgentToolMeta(
+        event_id=event_id,
+        source=source,
+        record_count=count,
+        truncated=count == limit,
+    )
+
+
+@router.get(
+    "/agent/event",
+    operation_id="get_agent_event_detail",
+    response_model=AgentEventDetailResponse,
+    summary="Read the compact event detail bound to an event ID",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_event_detail(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentEventDetailResponse:
+    event = await _agent_event(event_id, session)
+    return AgentEventDetailResponse(
+        event_id=event.id,
+        event_type=event.event_type,
+        event_timestamp=event.event_timestamp,
+        location_id=event.location_id,
+        facility_id=event.facility_id,
+        zone=event.zone,
+        detector_confidence=event.detector_confidence,
+        status=event.status,
+    )
+
+
+@router.get(
+    "/agent/camera-metadata",
+    operation_id="get_agent_camera_metadata",
+    response_model=AgentCameraMetadataResponse,
+    summary="Read compact camera metadata bound to an event ID",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_camera_metadata(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentCameraMetadataResponse:
+    """Return only camera facts already bound to the requested event.
+
+    Camera identifiers are operational device references rather than subject
+    identity. Raw camera metadata, URLs, and free-form descriptions are never
+    exposed to the agent connection.
+    """
+    event = await _agent_event(event_id, session)
+    return AgentCameraMetadataResponse(
+        event_id=event.id,
+        camera_id=event.camera_id,
+        metadata_status="available" if event.camera_id else "unavailable",
+        location_id=event.location_id,
+        facility_id=event.facility_id,
+        zone=event.zone,
+    )
+
+
+@router.get(
+    "/agent/access-events",
+    operation_id="get_agent_access_events",
+    response_model=AgentAccessResponse,
+    summary="Read redacted access facts for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_access_events(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentAccessResponse:
+    event = await _agent_event(event_id, session)
+    adapter = MockAccessControlAdapter(session)
+    raw = await adapter.get_access_events(
+        event.location_id,
+        facility_id=event.facility_id,
+        limit=_AGENT_MAX_RECORDS,
+    )
+    records = [
+        AgentAccessFact(
+            access_type=row["access_type"],
+            access_granted=row["access_granted"],
+            occurred_at=row["occurred_at"],
+        )
+        for row in raw
+    ]
+    return AgentAccessResponse(
+        meta=_agent_meta(event.id, adapter.source_id, len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/schedule",
+    operation_id="get_agent_schedule",
+    response_model=AgentScheduleResponse,
+    summary="Read redacted schedule facts for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_schedule(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentScheduleResponse:
+    event = await _agent_event(event_id, session)
+    adapter = MockScheduleAdapter(session)
+    raw = await adapter.get_schedule(
+        event.location_id,
+        facility_id=event.facility_id,
+        limit=_AGENT_MAX_RECORDS,
+    )
+    records = [
+        AgentScheduleFact(
+            schedule_type=row["schedule_type"],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            is_active=row["is_active"],
+        )
+        for row in raw
+    ]
+    return AgentScheduleResponse(
+        meta=_agent_meta(event.id, adapter.source_id, len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/work-orders",
+    operation_id="get_agent_work_orders",
+    response_model=AgentWorkOrdersResponse,
+    summary="Read redacted work-order facts for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_work_orders(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentWorkOrdersResponse:
+    event = await _agent_event(event_id, session)
+    adapter = MockWorkOrderAdapter(session)
+    raw = await adapter.get_work_orders(
+        event.location_id,
+        facility_id=event.facility_id,
+        limit=_AGENT_MAX_RECORDS,
+    )
+    records = [
+        AgentWorkOrderFact(
+            scheduled_start=row["scheduled_start"],
+            scheduled_end=row["scheduled_end"],
+            status=row["status"],
+            requires_after_hours=row["requires_after_hours"],
+            approved=bool(row.get("approved_by")),
+        )
+        for row in raw
+    ]
+    return AgentWorkOrdersResponse(
+        meta=_agent_meta(event.id, adapter.source_id, len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/delivery",
+    operation_id="get_agent_delivery",
+    response_model=AgentDeliveryResponse,
+    summary="Read redacted delivery facts for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_delivery(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentDeliveryResponse:
+    event = await _agent_event(event_id, session)
+    adapter = MockDeliveryAdapter(session)
+    raw = await adapter.get_deliveries(
+        event.location_id,
+        facility_id=event.facility_id,
+        limit=_AGENT_MAX_RECORDS,
+    )
+    records = [
+        AgentDeliveryFact(
+            scheduled_start=row["scheduled_start"],
+            scheduled_end=row["scheduled_end"],
+            is_scheduled=row["is_scheduled"],
+        )
+        for row in raw
+    ]
+    return AgentDeliveryResponse(
+        meta=_agent_meta(event.id, adapter.source_id, len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/location-policy",
+    operation_id="get_agent_location_policy",
+    response_model=AgentPolicyResponse,
+    summary="Read redacted policy facts for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_location_policy(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentPolicyResponse:
+    event = await _agent_event(event_id, session)
+    stmt = (
+        select(SecurityRule)
+        .where(SecurityRule.is_active.is_(True))
+        .where(
+            (SecurityRule.location_id == event.location_id) | (SecurityRule.location_id.is_(None))
+        )
+        .where(
+            (SecurityRule.facility_id == event.facility_id) | (SecurityRule.facility_id.is_(None))
+        )
+        .limit(_AGENT_MAX_RECORDS)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    records = [
+        AgentPolicyFact(
+            rule_type=row.rule_type,
+            restricted_after=row.restricted_after,
+            restricted_before=row.restricted_before,
+            applies_to_zones=row.applies_to_zones,
+            is_active=row.is_active,
+        )
+        for row in rows
+    ]
+    return AgentPolicyResponse(
+        meta=_agent_meta(event.id, "db_security_rules", len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/incident-history",
+    operation_id="get_agent_incident_history",
+    response_model=AgentIncidentResponse,
+    summary="Read redacted incident-history facts for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_incident_history(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentIncidentResponse:
+    event = await _agent_event(event_id, session)
+    stmt = (
+        select(IncidentHistory)
+        .where(IncidentHistory.location_id == event.location_id)
+        .where(IncidentHistory.facility_id == event.facility_id)
+        .order_by(IncidentHistory.occurred_at.desc())
+        .limit(_AGENT_MAX_RECORDS)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    records = [
+        AgentIncidentFact(
+            incident_type=row.incident_type,
+            severity=row.severity,
+            occurred_at=row.occurred_at,
+            resolved=row.resolved,
+        )
+        for row in rows
+    ]
+    return AgentIncidentResponse(
+        meta=_agent_meta(event.id, "db_incident_history", len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/integration-health",
+    operation_id="get_agent_integration_health",
+    response_model=AgentIntegrationResponse,
+    summary="Read redacted evidence-source health for the supplied event",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_integration_health(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentIntegrationResponse:
+    event = await _agent_event(event_id, session)
+    adapters = [
+        MockAccessControlAdapter(session),
+        MockScheduleAdapter(session),
+        MockWorkOrderAdapter(session),
+        MockDeliveryAdapter(session),
+    ]
+    health = [await adapter.health_check() for adapter in adapters]
+    persisted = (await session.execute(select(IntegrationHealth))).scalars().all()
+    known = {item["source_id"] for item in health}
+    health.extend(
+        {
+            "source_id": row.source_id,
+            "status": row.status,
+            "last_successful_at": row.last_successful_at,
+            "consecutive_failures": row.consecutive_failures,
+        }
+        for row in persisted
+        if row.source_id not in known
+    )
+    records = [
+        AgentIntegrationFact(
+            source_id=item["source_id"],
+            status=item["status"],
+            last_successful_at=item.get("last_successful_at"),
+            consecutive_failures=item.get("consecutive_failures", 0),
+        )
+        for item in health[:_AGENT_MAX_RECORDS]
+    ]
+    return AgentIntegrationResponse(
+        meta=_agent_meta(event.id, "aggregator", len(records)),
+        records=records,
+    )
+
+
+@router.get(
+    "/agent/assessment",
+    operation_id="get_agent_assessment",
+    response_model=AgentAssessmentResponse,
+    summary="Read the compact persisted assessment bound to an event ID",
+    dependencies=[Depends(require_permission(_PERM))],
+)
+async def get_agent_assessment(
+    event_id: str = Query(..., min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_db),
+) -> AgentAssessmentResponse:
+    event = await _agent_event(event_id, session)
+    assessment = (
+        await session.execute(select(RiskAssessment).where(RiskAssessment.event_id == event.id))
+    ).scalar_one_or_none()
+    if assessment is None:
+        raise HTTPException(status_code=404, detail="Assessment not found.")
+    recommendation = (
+        await session.execute(select(Recommendation).where(Recommendation.event_id == event.id))
+    ).scalar_one_or_none()
+    return AgentAssessmentResponse(
+        event_id=event.id,
+        event_status=event.status,
+        risk_score=assessment.risk_score,
+        risk_level=assessment.risk_level,
+        risk_policy_version=assessment.risk_policy_version,
+        confidence_score=assessment.confidence_score,
+        confidence_level=assessment.confidence_level,
+        summary=recommendation.summary if recommendation is not None else "",
+        missing_evidence=(
+            _json_string_list(recommendation.missing_evidence_json)
+            if recommendation is not None
+            else []
+        ),
+        human_review_required=True,
     )

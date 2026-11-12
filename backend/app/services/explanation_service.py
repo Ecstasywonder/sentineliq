@@ -86,6 +86,12 @@ _EVIDENCE_SOURCE_BY_FACTOR = {
     "no_scheduled_entry": ("mock_schedule",),
     "known_incident_area": ("hybrid_knowledge", "db_incident_history"),
     "critical_zone": ("hybrid_knowledge", "db_security_rules"),
+    "no_matching_badge": ("mock_access_control",),
+    "outside_schedule": ("mock_schedule",),
+    "restricted_area": ("hybrid_knowledge", "db_security_rules"),
+    "recent_incidents": ("hybrid_knowledge", "db_incident_history"),
+    "approved_maintenance": ("mock_work_order",),
+    "valid_access_schedule": ("mock_access_control", "mock_schedule"),
 }
 _ENFORCEMENT_ACTION_PATTERN = re.compile(
     r"\b(?:detain|arrest|apprehend|restrain|confront|pursue|search|seize|"
@@ -170,6 +176,7 @@ class ExplanationService:
         evidence: Any | None = None,
         *,
         timeout: float | None = None,
+        force_deterministic: bool = False,
     ) -> ExplanationResult:
         """
         Produce a grounded explanation for a security event assessment.
@@ -223,7 +230,7 @@ class ExplanationService:
         )
 
         # ---- PATH B: watsonx Orchestrate SaaS --------------------------------
-        if settings.orchestrate_active:
+        if settings.orchestrate_active and not force_deterministic:
             attempt_id = str(uuid.uuid4())
             attempt_started_at = datetime.now(UTC).isoformat()
             attempt_t0 = time.monotonic()
@@ -284,7 +291,7 @@ class ExplanationService:
                 )
 
         # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
-        if settings.watsonx_active:
+        if settings.watsonx_active and not force_deterministic:
             attempt_id = str(uuid.uuid4())
             attempt_started_at = datetime.now(UTC).isoformat()
             attempt_t0 = time.monotonic()
@@ -346,7 +353,11 @@ class ExplanationService:
         attempt_id = str(uuid.uuid4())
         attempt_started_at = datetime.now(UTC).isoformat()
         duration_ms = (time.monotonic() - overall_t0) * 1000
-        neither = not settings.orchestrate_active and not settings.watsonx_active
+        neither = (
+            not force_deterministic
+            and not settings.orchestrate_active
+            and not settings.watsonx_active
+        )
         path0_status = "skipped" if neither else "failed_fallback"
 
         result = grounded_base.model_copy(deep=True)
@@ -844,6 +855,12 @@ class ExplanationService:
             "no_scheduled_entry": "No scheduled access entry covers this location for the event time.",
             "known_incident_area": "This location has a history of prior security incidents.",
             "critical_zone": "The location is subject to active security restrictions.",
+            "no_matching_badge": "No matching authorised badge record was found.",
+            "outside_schedule": "Activity was outside the permitted schedule.",
+            "restricted_area": "The location is subject to active access restrictions.",
+            "recent_incidents": "Relevant prior incidents were recorded at this location.",
+            "approved_maintenance": "An approved maintenance activity was found.",
+            "valid_access_schedule": "Valid access and a matching schedule were found.",
         }
         for factor in risk_factors:
             if not factor.get("triggered"):

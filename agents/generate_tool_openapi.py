@@ -8,6 +8,7 @@ cannot drift and write endpoints can never be imported as agent tools.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -19,30 +20,32 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
 APPROVED_OPERATIONS = {
-    "/api/v1/events/{event_id}": "get",
-    "/api/v1/tools/access-events": "get",
-    "/api/v1/tools/schedule": "get",
-    "/api/v1/tools/work-orders": "get",
-    "/api/v1/tools/delivery": "get",
-    "/api/v1/tools/location-policy": "get",
-    "/api/v1/tools/incident-history": "get",
-    "/api/v1/tools/knowledge-search": "get",
-    "/api/v1/tools/integration-health": "get",
-    "/api/v1/tools/assessment-bundle": "get",
+    "/api/v1/tools/agent/event": "get",
+    "/api/v1/tools/agent/camera-metadata": "get",
+    "/api/v1/tools/agent/access-events": "get",
+    "/api/v1/tools/agent/schedule": "get",
+    "/api/v1/tools/agent/work-orders": "get",
+    "/api/v1/tools/agent/delivery": "get",
+    "/api/v1/tools/agent/location-policy": "get",
+    "/api/v1/tools/agent/incident-history": "get",
+    "/api/v1/tools/agent/integration-health": "get",
+    "/api/v1/tools/agent/assessment": "get",
 }
 
 EXPECTED_OPERATION_IDS = {
-    "get_event_detail",
-    "get_access_events",
-    "get_schedule",
-    "get_work_orders",
-    "get_delivery",
-    "get_location_policy",
-    "get_incident_history",
-    "search_knowledge",
-    "get_integration_health",
-    "get_assessment_bundle",
+    "get_agent_event_detail",
+    "get_agent_camera_metadata",
+    "get_agent_access_events",
+    "get_agent_schedule",
+    "get_agent_work_orders",
+    "get_agent_delivery",
+    "get_agent_location_policy",
+    "get_agent_incident_history",
+    "get_agent_integration_health",
+    "get_agent_assessment",
 }
+
+OAUTH_SCHEME_NAME = "sentineliq_tools_oauth"
 
 
 def _tool_description(path: str, method: str, operation: dict[str, Any]) -> str:
@@ -92,6 +95,7 @@ def build_tool_spec(api_base_url: str) -> dict[str, Any]:
         # application and may be generated more than once in tests/processes.
         selected_operation = dict(operation)
         selected_operation["description"] = _tool_description(path, method, selected_operation)
+        selected_operation["security"] = [{OAUTH_SCHEME_NAME: ["tools:read"]}]
         selected_paths[path] = {method: selected_operation}
 
     if operation_ids != EXPECTED_OPERATION_IDS:
@@ -99,6 +103,25 @@ def build_tool_spec(api_base_url: str) -> dict[str, Any]:
             "Tool operation IDs drifted: "
             f"expected={sorted(EXPECTED_OPERATION_IDS)} actual={sorted(operation_ids)}"
         )
+
+    components = copy.deepcopy(full.get("components", {}))
+    components["securitySchemes"] = {
+        OAUTH_SCHEME_NAME: {
+            "type": "oauth2",
+            "description": (
+                "OAuth2 client credentials for the purpose-bound SentinelIQ "
+                "Orchestrate tool identity."
+            ),
+            "flows": {
+                "clientCredentials": {
+                    "tokenUrl": (
+                        f"{api_base_url.rstrip('/')}/api/v1/auth/service-token"
+                    ),
+                    "scopes": {"tools:read": "Read redacted, event-bound evidence"},
+                }
+            },
+        }
+    }
 
     return {
         "openapi": full.get("openapi", "3.1.0"),
@@ -112,7 +135,7 @@ def build_tool_spec(api_base_url: str) -> dict[str, Any]:
         },
         "servers": [{"url": api_base_url.rstrip("/")}],
         "paths": selected_paths,
-        "components": full.get("components", {}),
+        "components": components,
     }
 
 

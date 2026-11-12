@@ -5,7 +5,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 
 : "${SENTINELIQ_API_BASE_URL:?Set the externally reachable SentinelIQ API base URL}"
-: "${SENTINELIQ_API_BEARER_TOKEN:?Set a tools:read service bearer token}"
+: "${SENTINELIQ_API_CLIENT_ID:?Set the Orchestrate tools OAuth client ID}"
+: "${SENTINELIQ_API_CLIENT_SECRET:?Set the Orchestrate tools OAuth client secret}"
 
 command -v orchestrate >/dev/null || {
   echo "orchestrate CLI not found; activate the EC2 ADK virtualenv first" >&2
@@ -26,10 +27,17 @@ sed "s|__SENTINELIQ_API_BASE_URL__|${SENTINELIQ_API_BASE_URL%/}|g" \
 orchestrate connections import -f "${tmp_dir}/sentineliq-api.yaml"
 for connection_env in draft live; do
   orchestrate connections configure \
-    -a sentineliq_api --env "${connection_env}" --type team --kind bearer \
+    -a sentineliq_api --env "${connection_env}" --type team \
+    --kind oauth_auth_client_credentials_flow \
     --server-url "${SENTINELIQ_API_BASE_URL%/}"
   orchestrate connections set-credentials \
-    -a sentineliq_api --env "${connection_env}" --token "${SENTINELIQ_API_BEARER_TOKEN}"
+    -a sentineliq_api --env "${connection_env}" \
+    --client-id "${SENTINELIQ_API_CLIENT_ID}" \
+    --client-secret "${SENTINELIQ_API_CLIENT_SECRET}" \
+    --send-via header \
+    --token-url "${SENTINELIQ_API_BASE_URL%/}/api/v1/auth/service-token" \
+    --grant-type client_credentials \
+    --scope tools:read
 done
 
 orchestrate tools import -k openapi \

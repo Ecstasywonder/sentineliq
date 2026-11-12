@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import AccessEvent
 from app.models.delivery import Delivery
+from app.models.event import SecurityEvent
 from app.models.incident import IncidentHistory
 from app.models.integration import IntegrationHealth
 from app.models.schedule import Schedule
@@ -159,6 +160,26 @@ async def _seed_integration_health(session: AsyncSession) -> IntegrationHealth:
         name="External Camera System",
         status="healthy",
         consecutive_failures=0,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def _seed_event(session: AsyncSession, location_id: str) -> SecurityEvent:
+    row = SecurityEvent(
+        id=_uid(),
+        provider_event_id=f"provider-{_uid()}",
+        source_adapter="test",
+        event_type="person_detected",
+        event_timestamp="2026-11-03T08:00:00Z",
+        location_id=location_id,
+        facility_id=_FAC,
+        camera_id="sensitive-camera-id",
+        zone="standard",
+        detector_confidence=0.91,
+        raw_metadata='{"sensitive":"raw value"}',
+        status="normalised",
     )
     session.add(row)
     await session.flush()
@@ -417,3 +438,115 @@ class TestIntegrationHealthEndpoint:
     async def test_meta_source_is_aggregator(self, client: AsyncClient):
         resp = await client.get("/api/v1/tools/integration-health")
         assert resp.json()["meta"]["source"] == "aggregator"
+
+
+# ===========================================================================
+# Event-bound Orchestrate façades
+# ===========================================================================
+
+
+class TestAgentToolFacades:
+    async def test_event_detail_is_compact_and_excludes_raw_fields(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        event = await _seed_event(db_session, _LOC)
+
+        response = await client.get(f"/api/v1/tools/agent/event?event_id={event.id}")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == {
+            "event_id",
+            "event_type",
+            "event_timestamp",
+            "location_id",
+            "facility_id",
+            "zone",
+            "detector_confidence",
+            "status",
+        }
+        assert "camera_id" not in body
+        assert "raw_metadata" not in body
+
+    async def test_access_tool_ignores_caller_scope_and_redacts_identity(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        event = await _seed_event(db_session, "event-bound-location")
+        await _seed_access_event(db_session, "event-bound-location")
+        await _seed_access_event(db_session, "caller-requested-other-location")
+
+        response = await client.get(
+            "/api/v1/tools/agent/access-events",
+            params={
+                "event_id": event.id,
+                "location_id": "caller-requested-other-location",
+                "facility_id": "caller-requested-other-facility",
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["meta"]["event_id"] == event.id
+        assert body["meta"]["record_count"] == 1
+        assert set(body["records"][0]) == {
+            "access_type",
+            "access_granted",
+            "occurred_at",
+        }
+        serialized = response.text
+        assert "badge-001" not in serialized
+        assert "emp-ref-001" not in serialized
+        assert "caller-requested-other-location" not in serialized
+
+    async def test_camera_metadata_is_event_bound_and_excludes_raw_metadata(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        event = await _seed_event(db_session, _LOC)
+
+        response = await client.get(
+            "/api/v1/tools/agent/camera-metadata",
+            params={"event_id": event.id, "camera_id": "caller-controlled-camera"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "event_id": event.id,
+            "camera_id": "sensitive-camera-id",
+            "metadata_status": "available",
+            "location_id": _LOC,
+            "facility_id": _FAC,
+            "zone": "standard",
+        }
+        assert "caller-controlled-camera" not in response.text
+        assert "raw value" not in response.text
+
+    async def test_incident_tool_redacts_narrative_and_uses_event_location(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        event = await _seed_event(db_session, _LOC)
+        await _seed_incident(db_session, _LOC)
+
+        response = await client.get(f"/api/v1/tools/agent/incident-history?event_id={event.id}")
+
+        assert response.status_code == 200
+        assert response.json()["meta"]["record_count"] == 1
+        assert set(response.json()["records"][0]) == {
+            "incident_type",
+            "severity",
+            "occurred_at",
+            "resolved",
+        }
+        assert "Suspected tailgating" not in response.text
+        assert "Badge swipe" not in response.text
+
+    async def test_agent_tools_reject_unknown_event(self, client: AsyncClient) -> None:
+        response = await client.get("/api/v1/tools/agent/integration-health?event_id=missing-event")
+        assert response.status_code == 404

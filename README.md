@@ -40,24 +40,25 @@ gate reports retain their original labels; the
 | 10 | Confidence engine | ✅ Complete |
 | 11 | Triage Agent | ⚠️ Partial — implementation/tests exist; live Orchestrate validation outstanding |
 | 12 | Context Agent | ⚠️ Partial — implementation/tests exist; live Orchestrate validation outstanding |
-| 13 | Explanation Agent | 🟡 Candidate implementation validated on EC2; live provider integration and strict CI/merge evidence remain outstanding |
-| 14 | Coordinator and end-to-end agent workflow | ⚠️ Partial — backend workflow passes on EC2; live Coordinator import/invocation unverified |
+| 13 | Explanation Agent | 🟡 Candidate implementation; current live provider integration and strict CI/merge evidence remain outstanding |
+| 14 | Coordinator and end-to-end agent workflow | ⚠️ Partial — deterministic backend workflow exists; live watsonx Orchestrate import, tool/collaborator execution, and Coordinator invocation remain unverified |
 | 15 | Human-review workflow | ✅ Backend APIs implemented |
-| 16 | Operator dashboard foundation | 🟡 Implementation complete on EC2; strict completion awaits CI and merge |
+| 16 | Operator dashboard foundation | 🟡 Candidate implementation; strict completion awaits current EC2 validation, CI, and merge |
 | 17 | Event decision interface | ✅ Complete |
 | 18 | Audit and history interface | ✅ Complete |
 | 19 | RBAC and administrative controls | ✅ Complete |
 | 20 | Integration and failure-state hardening | ✅ Complete |
 | 21 | Evaluation framework | ✅ Complete |
 | 22 | Security and adversarial testing | ✅ Complete |
-| 23–48 | Remaining MVP and production gates | 🔲 Pending |
+| 23 | MVP usability and operator validation readiness | 🟡 Candidate — runner contract repair and current EC2 evidence pending |
+| 24 | MVP release candidate | 🟡 Candidate — release validation, CI, live Orchestrate evidence, and merge pending |
+| 25 | MVP demonstration and freeze | 🔲 Pending — systemd Caddy HTTPS path requires deployment verification |
+| 26–48 | Remaining production gates | 🔲 Pending |
 
-**Latest validation (Gate 22):** 782 backend tests passed with 90.82% coverage on
-isolated EC2; 39 frontend tests, dependency and secret scans, and both production
-image scans passed. The required GitHub CI Gate passed and PR #2 merged as
-`4a9d8c0`. See the [Gate 22 report](docs/gate-22-ci-supply-chain.md).
-
-**Stop point:** Gate 22 is complete. Gate 23 has not started.
+**Current release state:** `gate-25-mvp-demo-freeze` is the strongest candidate
+baseline, but it is not `main` and is not a completed release. Gates 14, 23,
+and 24 require fresh EC2 and protected-branch CI evidence. See the
+[master gate plan](docs/master-gate-plan.md).
 
 ---
 

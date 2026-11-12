@@ -14,11 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
+from app.models.event import SecurityEvent
 from app.models.user import Role, User, UserRole
 from app.security.passwords import hash_password
 from app.security.rbac import permissions_for_roles
 from app.security.tokens import (
     SERVICE_TOKEN_AUDIENCE,
+    SERVICE_TOKEN_ISSUER,
     TokenError,
     create_service_access_token,
     decode_access_token,
@@ -79,6 +81,8 @@ def test_service_token_has_explicit_audience_and_purpose() -> None:
     token = create_service_access_token("svc-1", ["agent_tool_reader"], "orchestrate_tools")
     payload = decode_access_token(token)
     assert payload["aud"] == SERVICE_TOKEN_AUDIENCE
+    assert payload["iss"] == SERVICE_TOKEN_ISSUER
+    assert payload["jti"]
     assert payload["purpose"] == "orchestrate_tools"
 
 
@@ -115,13 +119,32 @@ async def test_orchestrate_token_is_bounded_even_after_admin_role_misassignment(
     )
     token = create_service_access_token(user.id, ["agent_tool_reader"], "orchestrate_tools")
     headers = {"Authorization": f"Bearer {token}"}
+    event = SecurityEvent(
+        id=_id(),
+        source_adapter="test",
+        event_type="person_detected",
+        event_timestamp="2026-11-07T10:00:00Z",
+        location_id="service-tool-test",
+        status="normalised",
+    )
+    db_session.add(event)
+    await db_session.flush()
 
     async for client in _raw_client(db_session):
-        tool_response = await client.get("/api/v1/tools/integration-health", headers=headers)
+        tool_response = await client.get(
+            f"/api/v1/tools/agent/integration-health?event_id={event.id}",
+            headers=headers,
+        )
+        broad_tool_response = await client.get(
+            "/api/v1/tools/integration-health",
+            headers=headers,
+        )
         admin_response = await client.get("/api/v1/admin/users", headers=headers)
         human_response = await client.get("/api/v1/auth/me", headers=headers)
 
     assert tool_response.status_code == 200
+    assert broad_tool_response.status_code == 403
+    assert broad_tool_response.json()["detail"]["code"] == "HUMAN_TOKEN_REQUIRED"
     assert admin_response.status_code == 403
     assert admin_response.json()["detail"]["code"] == "SERVICE_PURPOSE_FORBIDDEN"
     assert human_response.status_code == 403
@@ -176,10 +199,17 @@ async def test_event_ingestor_token_cannot_read_or_decide_events(
             },
         )
         read_response = await client.get("/api/v1/events", headers=headers)
+        simulator_response = await client.post(
+            "/api/v1/simulator/generate",
+            headers=headers,
+            json={"scenario_ids": ["demo-scenario-a"], "persist": False},
+        )
 
     assert ingest_response.status_code == 201
     assert read_response.status_code == 403
     assert read_response.json()["detail"]["code"] == "SERVICE_PURPOSE_FORBIDDEN"
+    assert simulator_response.status_code == 403
+    assert simulator_response.json()["detail"]["code"] == "HUMAN_TOKEN_REQUIRED"
 
 
 @pytest.mark.asyncio

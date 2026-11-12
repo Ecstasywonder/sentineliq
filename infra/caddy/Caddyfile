@@ -14,6 +14,8 @@
 	header {
 		-Server
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; upgrade-insecure-requests"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
@@ -21,6 +23,7 @@
 
 	@api path /api/v1/*
 	@health path /health
+	@ready path /ready
 
 	handle @api {
 		reverse_proxy 127.0.0.1:8000
@@ -29,8 +32,14 @@
 	handle @health {
 		reverse_proxy 127.0.0.1:8000
 	}
+	# Readiness may contain dependency diagnostics intended for local operators.
+	# Keep that detail off the public interface; Compose and operators can query
+	# the loopback backend directly when troubleshooting.
+	handle @ready {
+		respond 404
+	}
 
 	handle {
-		respond "Not Found" 404
+		reverse_proxy 127.0.0.1:3000
 	}
 }

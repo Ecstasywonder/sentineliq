@@ -12,6 +12,17 @@ class SimulatorGenerateRequest(BaseModel):
 
     scenario_ids: list[str] | None = Field(default=None, min_length=1, max_length=100)
     persist: bool = Field(default=True, description="Persist events; false previews only.")
+    instance_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        description=(
+            "Optional bounded run identifier appended to provider event IDs. "
+            "This lets an authorised demo runner create a fresh, independently "
+            "reviewable event without deleting or mutating an earlier run."
+        ),
+    )
 
 
 class SimulatorEventResponse(BaseModel):

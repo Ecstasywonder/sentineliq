@@ -1,6 +1,6 @@
 # Gate 14–16 Engineering Handoff
 
-**Status date:** 2026-11-07  
+**Status date:** 2026-11-12
 **Status:** living handoff; Gate 14 remains pending live-runtime evidence  
 **Validation rule:** perform installations and tests on the EC2 environment only.
 
@@ -19,18 +19,17 @@ and [source-of-truth hierarchy](source-of-truth.md).
   are not documented here.
 - The Orchestrate ADK is installed on EC2 and an active working environment
   was registered for this Gate 14 validation.
-- The SentinelIQ read-only tool set was imported: `get_event_detail`,
-  `get_access_events`, `get_assessment_bundle`, `get_delivery`,
-  `get_incident_history`, `get_integration_health`, `search_knowledge`,
-  `get_location_policy`, `get_schedule`, and `get_work_orders`.
-- Four SentinelIQ agents were imported and deployed. Their current runtime
-  identifiers are:
+- An older SentinelIQ read-only tool set and four agents were imported during
+  the prior Gate 14 work. Those tenant assets are now stale relative to the
+  OAuth-protected, event-bound ten-tool contract in candidate `993c0fe` and
+  must not be treated as current acceptance evidence. The tenant snapshot
+  observed on 2026-11-12 used these runtime identifiers:
 
   | Agent | Runtime UUID |
   |---|---|
-  | Triage | `03b55ef8-ff71-4605-8ba4-4e1fb2588b15` |
-  | Context | `a0746580-6bbf-42c5-98dc-8668c8fb84b1` |
-  | Explanation | `77cca91e-63f5-475e-a410-529025eb0b2d` |
+  | Triage | `76daed62-455c-4999-93b1-8ab7aff82c31` |
+  | Context | `49216ec7-117f-4547-8bd5-9756aef3f523` |
+  | Explanation | `093479ec-41e9-43d8-89b3-28d1cbffa75f` |
   | Coordinator | `98c49c40-3cce-4372-9030-14a71f400062` |
 
   Re-importing an agent can create a new UUID; confirm the active identifiers
@@ -38,8 +37,10 @@ and [source-of-truth hierarchy](source-of-truth.md).
 - The backend was rebuilt from source on EC2. Runtime image construction was
   checked so ignored environment files and private-key material are not baked
   into the image.
-- Database migrations through Alembic revision `0004_decision_snapshot` were
-  applied on EC2. The backend health endpoint is healthy.
+- The candidate migration chain was validated on a disposable EC2 PostgreSQL
+  database through `0006_unique_service_purpose`, including downgrade to base
+  and re-upgrade. The currently running shared deployment remains an older
+  build until the candidate merges and is deliberately redeployed.
 
 ### Orchestrate invocation contract
 
@@ -54,41 +55,45 @@ and [source-of-truth hierarchy](source-of-truth.md).
 
 ### Platform and transport
 
-- Caddy was installed and configured on EC2 as the HTTPS reverse proxy for
-  the backend API, including health handling and API proxying.
+- Caddy was installed and configured on EC2 as the systemd-managed HTTPS proxy
+  for the frontend application, API, health, and readiness routes. It is the
+  intended team access path once its public host and deployed revision have
+  been revalidated.
 - A publicly trusted short-lived certificate for the current public IP was
   obtained successfully. The public IP is not an Elastic IP, so a stable EIP
   or DNS name remains a deployment hardening recommendation.
 
-### Focused verification already completed on EC2
+### Candidate verification completed on EC2
 
-- Focused backend tests covering configuration, Orchestrate client behavior,
-  triage behavior, and tool contract behavior passed (99 tests before the
-  latest draft/live connection regression test was added).
-- Ruff and shell syntax checks for the agent import/delete scripts passed.
-- A synthetic normalized event completed the persisted backend assessment
-  workflow: event status advanced to `awaiting_review`, deterministic risk and
-  confidence were calculated, a recommendation was persisted, and mandatory
-  human review remained required.
+- Commit `993c0fe`: 816 backend tests passed, 3 skipped, with 91% coverage;
+  the focused security/configuration/simulator/tool suite passed 103 tests.
+- Frontend format, typecheck, lint, 57 unit tests, and production build passed.
+- Gate 23 passed 73/73 assertions and the deterministic Gate 24 smoke passed
+  108/108 checks on disposable EC2 stacks.
+- GitHub Actions run `43232697244` passed backend, frontend, Gitleaks, Trivy,
+  and the aggregate CI gate.
 
-## Current live-runtime blocker
+## Current live-runtime state and blocker
 
-**Observed evidence:** Calls to each deployed Orchestrate specialist reach the
-live runtime and return HTTP 200, but the assistant content is the generic
-runtime error message rather than the required structured JSON. The backend
-correctly rejects that non-JSON output.
+**Observed evidence on 2026-11-12:** the SentinelIQ-owned Groq probe returned
+`PROBE_OK`; the Granite probe returned valid JSON; and the currently deployed
+Triage, Context, and Explanation specialists returned valid JSON when called
+with the actual backend prompts. The earlier generic-error evidence therefore
+does not establish a current tenant-wide or model-wide outage.
 
-**Effect:** The synthetic assessment persisted safely, but its specialist
-sources showed the interim fallbacks rather than verified `orchestrate` output:
-triage and explanation used the former watsonx.ai path, and context used the
-deterministic fallback. This is not sufficient evidence to close Gate 14.
+**Remaining blocker:** the live tenant definitions do not match candidate
+`993c0fe`. Context has no current event-bound tool set/structured contract and
+Coordinator has no current collaborators and stale tool references. The new
+OAuth team connection and ten approved GET tools also depend on the candidate
+API being deployed. Direct specialist prompts are useful isolation evidence,
+but do not prove tool execution, collaborator execution, or the complete
+backend Path B workflow.
 
-**Likely isolation steps (not yet proven):** validate a SentinelIQ-owned
-minimal no-tool/no-schema probe with a tenant-enabled model; then separately
-introduce structured output and read-only tools. This distinguishes model
-availability, output-schema compatibility, and connection/tool configuration
-without touching unrelated tenant resources. Retain sanitized run evidence for
-each result.
+**Required proof:** after the candidate API is deployed, import and deploy only
+the four SentinelIQ definitions and approved tool bundle, update the ignored
+runtime UUID settings, then capture a fresh event whose specialist sources are
+`orchestrate` plus a Coordinator run showing real event-bound tool and
+collaborator telemetry.
 
 ## Architecture decision now in force
 
@@ -109,9 +114,8 @@ describes dual-provider routing as the target architecture.
 
 Gate 14 is **pending** until all of the following are evidenced on EC2:
 
-1. Resolve the generic live Orchestrate runtime response for SentinelIQ-owned
-   agents and verify valid schema-conforming outputs from triage, context, and
-   explanation.
+1. Import the candidate OAuth connection, tools, and four agent definitions;
+   verify the active tenant definitions match the checked-in contracts.
 2. Run a new synthetic event through the complete backend path and show all
    three specialist sources as `orchestrate`, with persisted `AgentRun` and
    tool-call observability.
@@ -121,8 +125,8 @@ Gate 14 is **pending** until all of the following are evidenced on EC2:
 4. Remove the watsonx.ai Path A fallback, update targeted tests and
    configuration/docs, and demonstrate the retained deterministic safety path
    for Orchestrate failure.
-5. Run the focused regression suite on EC2 again (including the new
-   draft/live connection test), then run the broader relevant quality gates.
+5. Run the focused regression suite on EC2 again after Path A removal, then run
+   the broader relevant quality gates.
 6. Update the canonical gate plan/source-of-truth only after the above evidence
    is available and the changes have passed CI on the pushed commit.
 
@@ -150,13 +154,11 @@ connection details in the operator interface.
 
 ## Recommended next actions
 
-1. On EC2, list only safe model identifiers/statuses and run an isolated,
-   SentinelIQ-owned minimal agent probe. Do not alter or delete unrelated
-   tenant agents, connections, or tools.
-2. If the probe identifies model configuration as the cause, update the
-   SentinelIQ agent definitions to a tenant-enabled model; otherwise add back
-   structured output and tools one at a time to isolate the failing feature.
-3. Re-import/redeploy only the four SentinelIQ agents as needed, capture new
+1. Merge and deploy the validated candidate API so its OAuth service-token and
+   event-bound tools are publicly reachable through the hardened HTTPS route.
+2. Configure the purpose-bound OAuth team connection without printing or
+   committing its client secret.
+3. Re-import/redeploy only the four SentinelIQ agents and ten approved tools, capture new
    UUIDs, and update the ignored EC2 runtime configuration accordingly.
 4. Execute a fresh synthetic event (do not overwrite the prior evidence),
    verify specialist provenance and persisted observability, then execute the

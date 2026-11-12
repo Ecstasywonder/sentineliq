@@ -25,6 +25,7 @@ import jwt
 from app.config import get_settings
 
 SERVICE_TOKEN_AUDIENCE = "sentineliq-service"
+SERVICE_TOKEN_ISSUER = "sentineliq"
 SERVICE_TOKEN_PURPOSES = frozenset({"orchestrate_tools", "event_ingestion"})
 
 
@@ -60,6 +61,8 @@ def create_service_access_token(user_id: str, roles: list[str], purpose: str) ->
         "roles": roles,
         "type": "access",
         "aud": SERVICE_TOKEN_AUDIENCE,
+        "iss": SERVICE_TOKEN_ISSUER,
+        "jti": str(uuid.uuid4()),
         "purpose": purpose,
         "exp": expire,
     }
@@ -143,7 +146,15 @@ def decode_access_token(token: str) -> dict:
     purpose = payload.get("purpose")
     if audience is None and purpose is None:
         return payload
-    if audience != SERVICE_TOKEN_AUDIENCE or purpose not in SERVICE_TOKEN_PURPOSES:
+    issuer = payload.get("iss")
+    token_id = payload.get("jti")
+    if (
+        audience != SERVICE_TOKEN_AUDIENCE
+        or issuer != SERVICE_TOKEN_ISSUER
+        or purpose not in SERVICE_TOKEN_PURPOSES
+        or not isinstance(token_id, str)
+        or not token_id
+    ):
         raise TokenError("Invalid service token audience or purpose.")
     return payload
 

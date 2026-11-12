@@ -3,11 +3,11 @@ kind: connection
 app_id: sentineliq_api
 environments:
   draft:
-    security_scheme: bearer_token
+    security_scheme: oauth2
     type: team
     server_url: __SENTINELIQ_API_BASE_URL__
   live:
-    security_scheme: bearer_token
+    security_scheme: oauth2
     type: team
     server_url: __SENTINELIQ_API_BASE_URL__
 

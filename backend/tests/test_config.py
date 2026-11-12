@@ -16,6 +16,7 @@ def _production_settings(**overrides: object) -> Settings:
         "database_url": "postgresql+asyncpg://user:strong-password@db:5432/sentineliq",
         "database_url_sync": "postgresql://user:strong-password@db:5432/sentineliq",
         "cors_origins": ["https://console.example.com"],
+        "enable_simulator_api": False,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -47,6 +48,11 @@ def test_production_rejects_insecure_defaults(overrides: dict[str, object], expe
 def test_development_allows_local_defaults() -> None:
     settings = Settings(_env_file=None, app_env="development")
     assert settings.debug is False
+
+
+def test_production_rejects_simulator_api() -> None:
+    with pytest.raises(ValidationError, match="ENABLE_SIMULATOR_API"):
+        _production_settings(enable_simulator_api=True)
 
 
 def test_orchestrate_prefers_dedicated_iam_key() -> None:
@@ -99,6 +105,55 @@ def test_orchestrate_configuration_accepts_environment_agent_uuids() -> None:
         orchestrate_coordinator_agent_id="44444444-4444-4444-8444-444444444444",
     )
     assert settings.orchestrate_triage_agent_id == "11111111-1111-4111-8111-111111111111"
+
+
+def test_orchestrate_tools_oauth_credentials_are_atomic_and_redacted() -> None:
+    secret = "service-client-secret-longer-than-thirty-two-characters"
+    settings = Settings(
+        _env_file=None,
+        app_env="development",
+        orchestrate_tools_client_id="sentineliq-tools",
+        orchestrate_tools_client_secret=secret,
+    )
+    assert settings.orchestrate_tools_oauth_configured is True
+    assert secret not in repr(settings)
+
+    with pytest.raises(ValidationError, match="must be configured together"):
+        Settings(
+            _env_file=None,
+            app_env="development",
+            orchestrate_tools_client_id="sentineliq-tools",
+        )
+
+
+def test_production_orchestrate_requires_tools_oauth_credentials() -> None:
+    agent_ids = {
+        "orchestrate_triage_agent_id": "11111111-1111-4111-8111-111111111111",
+        "orchestrate_context_agent_id": "22222222-2222-4222-8222-222222222222",
+        "orchestrate_explanation_agent_id": "33333333-3333-4333-8333-333333333333",
+        "orchestrate_coordinator_agent_id": "44444444-4444-4444-8444-444444444444",
+    }
+    with pytest.raises(ValidationError, match="ORCHESTRATE_TOOLS_CLIENT"):
+        _production_settings(
+            orchestrate_url=(
+                "https://us-south.watson-orchestrate.cloud.ibm.com/instances/instance-123"
+            ),
+            orchestrate_api_key="secret",
+            **agent_ids,
+        )
+
+    settings = _production_settings(
+        orchestrate_url=(
+            "https://us-south.watson-orchestrate.cloud.ibm.com/instances/instance-123"
+        ),
+        orchestrate_api_key="secret",
+        orchestrate_tools_client_id="sentineliq-tools",
+        orchestrate_tools_client_secret=(
+            "service-client-secret-longer-than-thirty-two-characters"
+        ),
+        **agent_ids,
+    )
+    assert settings.orchestrate_tools_oauth_configured is True
 
 
 def test_watsonx_base_url_prefers_primary_setting() -> None:

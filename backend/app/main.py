@@ -101,6 +101,7 @@ def create_app() -> FastAPI:
             checks.append(("event_ingestion", identity, settings.rate_limit_events_per_minute))
         if request.method == "POST" and request.url.path in {
             "/api/v1/auth/token",
+            "/api/v1/auth/service-token",
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
         }:

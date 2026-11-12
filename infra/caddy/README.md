@@ -1,8 +1,11 @@
 # EC2 Caddy edge proxy
 
-This configuration exposes only the SentinelIQ API (`/api/v1/*`) and health
-endpoint (`/health`) over HTTPS. Every other path returns `404`; it is not a
-general-purpose web server.
+This configuration is the persistent HTTPS edge path for SentinelIQ. It proxies
+the browser application to the loopback frontend and proxies `/api/v1/*` and
+the minimal `/health` response to the loopback backend. Public `/ready` returns
+`404` because it can disclose dependency diagnostics; operators can query it
+from the EC2 loopback interface. Docker service ports remain loopback-only; do
+not publish them directly for team access.
 
 It requires Caddy **2.11.9 or later**. The configuration deliberately retains
 the `shortlived` ACME profile and configures `default_sni` from the same public
@@ -10,10 +13,11 @@ host used by the site block.
 
 ## Deploy on EC2
 
-1. Prefer a stable DNS name backed by an Elastic IP. Point the DNS A/AAAA
-   record at that address and ensure ports 80 and 443 are reachable so ACME can
-   complete its HTTP challenge. A raw public IP is less reliable: it changes
-   when an instance without an Elastic IP is stopped and started.
+1. Set `SENTINELIQ_PUBLIC_HOST` to the exact reachable public DNS name (or the
+   current public IP only as a temporary arrangement), and ensure ports 80 and
+   443 are reachable so ACME can complete its HTTP challenge. A public IP can
+   change after an instance stop/start unless the infrastructure separately
+   provides a stable address; this repository does not allocate or claim one.
 2. Install the versioned systemd override and its root-owned environment file:
 
    ```sh
@@ -27,19 +31,33 @@ host used by the site block.
    sudo systemctl reload caddy
    ```
 
-   Replace `api.example.com` with the exact public DNS name. If using the
-   current EC2 instance IP temporarily, set it to that IP and update the
-   environment file whenever the instance's public IP changes.
+   Replace `api.example.com` with the exact public host. If using the current
+   EC2 instance IP temporarily, update the environment file when that address
+   changes.
 
 3. Validate configuration and exposed routes (run the first command before
    reload when making a change):
 
    ```sh
    sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+   sudo systemctl enable --now caddy
    curl --fail --silent --show-error https://api.example.com/health
+   curl --silent --output /dev/null --write-out '%{http_code}\\n' https://api.example.com/ready
    curl --silent --output /dev/null --write-out '%{http_code}\\n' https://api.example.com/
    ```
 
-   The final command must print `404`. Test an authenticated API route through
-   `/api/v1/` separately; Caddy proxies it to the loopback backend at
-   `127.0.0.1:8000`.
+   The readiness command must print `404`; query detailed readiness locally with
+   `curl --fail http://127.0.0.1:8000/ready`. The final command should return the
+   frontend application (normally `200`).
+   Test an authenticated API route through `/api/v1/` separately; Caddy proxies
+   it to the loopback backend at `127.0.0.1:8000`.
+
+## Operating model
+
+`caddy.service` is systemd-managed, so the proxy persists across logout and
+restarts when enabled. This does not guarantee a permanent public address or
+DNS record: verify the host after infrastructure changes before distributing it
+to the team. Use an SSH tunnel only as a private troubleshooting fallback.
+
+Provision separate least-privilege application accounts for team members. Do
+not use a shared demo password in a public-facing runbook.

@@ -76,7 +76,7 @@ def test_build_tool_spec_does_not_mutate_fastapi_cached_operations() -> None:
     from app.main import app
 
     module = _generator_module()
-    cached_operation = app.openapi()["paths"]["/api/v1/tools/access-events"]["get"]
+    cached_operation = app.openapi()["paths"]["/api/v1/tools/agent/access-events"]["get"]
     original_operation = deepcopy(cached_operation)
 
     module.build_tool_spec("https://sentineliq.example.test")
@@ -88,7 +88,30 @@ def test_every_generated_tool_requires_authentication() -> None:
     module = _generator_module()
     contract = module.build_tool_spec("https://sentineliq.example.test")
     for path, path_item in contract["paths"].items():
-        assert path_item["get"].get("security"), f"Tool route lacks auth: {path}"
+        assert path_item["get"].get("security") == [
+            {module.OAUTH_SCHEME_NAME: ["tools:read"]}
+        ], f"Tool route has the wrong auth scope: {path}"
+
+        parameters = path_item["get"].get("parameters", [])
+        assert [parameter["name"] for parameter in parameters] == ["event_id"]
+
+    assert contract["components"]["securitySchemes"] == {
+        module.OAUTH_SCHEME_NAME: {
+            "type": "oauth2",
+            "description": (
+                "OAuth2 client credentials for the purpose-bound SentinelIQ "
+                "Orchestrate tool identity."
+            ),
+            "flows": {
+                "clientCredentials": {
+                    "tokenUrl": (
+                        "https://sentineliq.example.test/api/v1/auth/service-token"
+                    ),
+                    "scopes": {"tools:read": "Read redacted, event-bound evidence"},
+                }
+            },
+        }
+    }
 
 
 def test_connection_contract_configures_draft_and_live_runtime_environments() -> None:
@@ -100,7 +123,80 @@ def test_connection_contract_configures_draft_and_live_runtime_environments() ->
     assert set(connection["environments"]) == {"draft", "live"}
     for environment in connection["environments"].values():
         assert environment == {
-            "security_scheme": "bearer_token",
+            "security_scheme": "oauth2",
             "type": "team",
             "server_url": "__SENTINELIQ_API_BASE_URL__",
         }
+
+
+def _agent_contract(agent_directory: str) -> dict[str, object]:
+    agent_path = Path(__file__).resolve().parents[2] / "agents" / agent_directory / "agent.yaml"
+    contract = yaml.safe_load(agent_path.read_text(encoding="utf-8"))
+    assert isinstance(contract, dict)
+    return contract
+
+
+def test_context_agent_has_least_privilege_read_only_tool_contract() -> None:
+    context = _agent_contract("context")
+
+    assert context["style"] == "react_intrinsic"
+    assert context["collaborators"] == []
+    assert context["tools"] == [
+        "get_agent_event_detail",
+        "get_agent_camera_metadata",
+        "get_agent_access_events",
+        "get_agent_schedule",
+        "get_agent_work_orders",
+        "get_agent_delivery",
+        "get_agent_location_policy",
+        "get_agent_incident_history",
+        "get_agent_integration_health",
+    ]
+    assert set(context["tools"]).issubset(_generator_module().EXPECTED_OPERATION_IDS)
+    assert "get_agent_assessment" not in context["tools"]
+
+
+def test_context_agent_structured_output_is_narrow_and_strict() -> None:
+    context = _agent_contract("context")
+
+    assert context["structured_output"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["event_id", "context_summary"],
+        "properties": {
+            "event_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "context_summary": {"type": "string", "maxLength": 1024},
+        },
+    }
+
+
+def test_coordinator_agent_contract_uses_intrinsic_collaboration_and_schema() -> None:
+    coordinator = _agent_contract("coordinator")
+
+    assert coordinator["style"] == "react_intrinsic"
+    assert coordinator["collaborators"] == [
+        "sentinel_triage_agent",
+        "sentinel_context_agent",
+        "sentinel_explanation_agent",
+    ]
+    assert coordinator["tools"] == ["get_agent_event_detail", "get_agent_assessment"]
+    assert set(coordinator["tools"]).issubset(_generator_module().EXPECTED_OPERATION_IDS)
+
+    assert coordinator["structured_output"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "event_id",
+            "assessment_ready",
+            "summary",
+            "missing_evidence",
+            "human_review_required",
+        ],
+        "properties": {
+            "event_id": {"type": "string"},
+            "assessment_ready": {"type": "boolean"},
+            "summary": {"type": "string", "maxLength": 1024},
+            "missing_evidence": {"type": "array", "items": {"type": "string"}},
+            "human_review_required": {"type": "boolean", "const": True},
+        },
+    }

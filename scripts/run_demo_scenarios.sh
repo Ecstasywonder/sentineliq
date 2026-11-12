@@ -99,6 +99,17 @@ try:
         "len_ge": lambda: isinstance(value, (list, dict, str)) and len(value) >= int(expected),
         "lte": lambda: isinstance(value, (int, float)) and value <= float(expected),
         "gte": lambda: isinstance(value, (int, float)) and value >= float(expected),
+        "keys_include": lambda: isinstance(value, dict) and set(filter(None, expected.split(","))) <= set(value),
+        "list_contains_text": lambda: isinstance(value, list) and any(
+            expected.lower() in str(item).lower() for item in value
+        ),
+        "list_lacks_text": lambda: isinstance(value, list) and all(
+            expected.lower() not in str(item).lower() for item in value
+        ),
+        "list_has_reason": lambda: isinstance(value, list) and any(
+            isinstance(item, dict) and str(item.get("reason", "")).lower() == expected.lower()
+            for item in value
+        ),
     }
     ok = checks[operation]()
 except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -132,6 +143,31 @@ print(json.dumps(dict(zip(sys.argv[1::2], sys.argv[2::2])), separators=(",", ":"
 PY
 }
 
+simulator_payload() {
+  local scenario_id="$1" persist="${2:-true}"
+  "$PYTHON" - "$scenario_id" "$persist" "$RUN_INSTANCE" <<'PY'
+import json, sys
+scenario_id, persist, instance_id = sys.argv[1:]
+print(json.dumps({
+    "scenario_ids": [scenario_id],
+    "persist": persist.lower() == "true",
+    "instance_id": instance_id,
+}, separators=(",", ":")))
+PY
+}
+
+persisted_event_id() {
+  "$PYTHON" - "$TMP_DIR/response.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    data = json.load(stream)
+events = data.get("events", []) if isinstance(data, dict) else []
+if not events or not events[0].get("persisted_event_id"):
+    raise SystemExit(1)
+print(events[0]["persisted_event_id"])
+PY
+}
+
 # ---------------------------------------------------------------------------
 # Authenticate
 # ---------------------------------------------------------------------------
@@ -149,6 +185,7 @@ else
 fi
 
 RUN_TIMESTAMP="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+RUN_INSTANCE="gate23-$(date -u +'%Y%m%dT%H%M%SZ')-$$"
 
 printf '\n============================================================\n'
 printf ' SentinelIQ — Gate 23 Demo Scenario Validation\n'
@@ -163,23 +200,13 @@ printf '============================================================\n'
 seed_and_assess() {
   local scenario_id="$1"
   local PAYLOAD
-  PAYLOAD="$(make_json scenario_ids "[\"${scenario_id}\"]")"
+  PAYLOAD="$(simulator_payload "$scenario_id")"
   # Simulator persist endpoint
-  api_request POST "$BASE_URL/api/v1/simulator/events" "$PAYLOAD"
-  check_status "Seed $scenario_id via simulator" "200 201"
-  # The simulator returns a list of results; extract the first event id
+  api_request POST "$BASE_URL/api/v1/simulator/generate" "$PAYLOAD"
+  check_status "Seed $scenario_id via simulator" 200
+  # The simulator returns events with persisted_event_id.
   local EVENT_ID
-  EVENT_ID="$("$PYTHON" - "$TMP_DIR/response.json" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as f:
-    data = json.load(f)
-# Simulator response: list of {scenario_id, event_id, status}
-items = data if isinstance(data, list) else data.get("results", [])
-if not items:
-    raise SystemExit(1)
-print(items[0].get("event_id", items[0].get("id", "")))
-PY
-  )"
+  EVENT_ID="$(persisted_event_id)"
   [[ -n "$EVENT_ID" ]] || die "simulator did not return event_id for $scenario_id"
   # Trigger deterministic assessment (AI fallback always available)
   api_request POST "$BASE_URL/api/v1/events/$EVENT_ID/assess" '{}'
@@ -195,24 +222,17 @@ PY
 printf '\n--- Scenario A: Authorized activity (low risk) ---\n'
 info "Valid badge, scheduled activity, permitted policy — expect low risk + high confidence"
 
-PAYLOAD_A='{"scenario_ids":["demo-scenario-a"]}'
-api_request POST "$BASE_URL/api/v1/simulator/events" "$PAYLOAD_A"
-check_status "Seed Scenario A" "200 201"
-EVENT_A="$("$PYTHON" - "$TMP_DIR/response.json" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f: d = json.load(f)
-items = d if isinstance(d, list) else d.get("results", [])
-print(items[0].get("event_id", items[0].get("id", "")))
-PY
-)"
+PAYLOAD_A="$(simulator_payload demo-scenario-a)"
+api_request POST "$BASE_URL/api/v1/simulator/generate" "$PAYLOAD_A"
+check_status "Seed Scenario A" 200
+EVENT_A="$(persisted_event_id)"
 [[ -n "$EVENT_A" ]] || die "Scenario A: no event_id returned"
 
 api_request POST "$BASE_URL/api/v1/events/$EVENT_A/assess" '{}'
 check_status "Assess Scenario A" 200
 json_assert "Scenario A: risk level is low" eq risk_level low
 json_assert "Scenario A: human review required in recommendation" true recommendation.requires_human_review
-json_assert "Scenario A: confidence score present" number confidence_score
-json_assert "Scenario A: confidence score is meaningful" gte confidence_score 0.3
+json_assert "Scenario A: confidence level is high" eq confidence_level high
 
 # Operator journey: verify event is in awaiting_review state
 api_request GET "$BASE_URL/api/v1/events/$EVENT_A"
@@ -233,16 +253,10 @@ json_assert "Scenario A: dismiss closes event" eq event_status dismissed
 printf '\n--- Scenario B: Unverified after-hours event (high risk) ---\n'
 info "No badge, no schedule, restricted area, prior incidents — expect high/critical risk"
 
-PAYLOAD_B='{"scenario_ids":["demo-scenario-b"]}'
-api_request POST "$BASE_URL/api/v1/simulator/events" "$PAYLOAD_B"
-check_status "Seed Scenario B" "200 201"
-EVENT_B="$("$PYTHON" - "$TMP_DIR/response.json" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f: d = json.load(f)
-items = d if isinstance(d, list) else d.get("results", [])
-print(items[0].get("event_id", items[0].get("id", "")))
-PY
-)"
+PAYLOAD_B="$(simulator_payload demo-scenario-b)"
+api_request POST "$BASE_URL/api/v1/simulator/generate" "$PAYLOAD_B"
+check_status "Seed Scenario B" 200
+EVENT_B="$(persisted_event_id)"
 [[ -n "$EVENT_B" ]] || die "Scenario B: no event_id returned"
 
 api_request POST "$BASE_URL/api/v1/events/$EVENT_B/assess" '{}'
@@ -250,7 +264,7 @@ check_status "Assess Scenario B" 200
 json_assert "Scenario B: risk level is high or critical" in risk_level "high,critical"
 json_assert "Scenario B: human review required" true recommendation.requires_human_review
 json_assert "Scenario B: risk score elevated" gte risk_score 50
-json_assert "Scenario B: confidence score present" number confidence_score
+json_assert "Scenario B: confidence level is high" eq confidence_level high
 
 api_request GET "$BASE_URL/api/v1/events/$EVENT_B"
 check_status "Scenario B: event accessible in queue" 200
@@ -275,31 +289,33 @@ json_assert "Scenario B: escalation is event-bound" eq event_id "$EVENT_B"
 printf '\n--- Scenario C: Missing evidence (degraded confidence) ---\n'
 info "Badge and schedule services unavailable — expect reduced confidence, no false assertions"
 
-PAYLOAD_C='{"scenario_ids":["demo-scenario-c"]}'
-api_request POST "$BASE_URL/api/v1/simulator/events" "$PAYLOAD_C"
-check_status "Seed Scenario C" "200 201"
-EVENT_C="$("$PYTHON" - "$TMP_DIR/response.json" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f: d = json.load(f)
-items = d if isinstance(d, list) else d.get("results", [])
-print(items[0].get("event_id", items[0].get("id", "")))
-PY
-)"
+PAYLOAD_C="$(simulator_payload demo-scenario-c)"
+api_request POST "$BASE_URL/api/v1/simulator/generate" "$PAYLOAD_C"
+check_status "Seed Scenario C" 200
+EVENT_C="$(persisted_event_id)"
 [[ -n "$EVENT_C" ]] || die "Scenario C: no event_id returned"
 
-api_request POST "$BASE_URL/api/v1/events/$EVENT_C/assess" '{}'
+api_request POST "$BASE_URL/api/v1/events/$EVENT_C/assess" \
+  '{"unavailable_source_ids":["mock_access_control","mock_schedule"]}'
 check_status "Assess Scenario C" 200
+json_assert "Scenario C: risk level is medium" eq risk_level medium
 json_assert "Scenario C: human review required" true recommendation.requires_human_review
 json_assert "Scenario C: confidence score present" number confidence_score
 json_assert "Scenario C: confidence reductions present" list confidence_reductions
 
 api_request GET "$BASE_URL/api/v1/events/$EVENT_C/assessment"
 check_status "Scenario C: assessment retrievable" 200
-json_assert "Scenario C: missing sources recorded" nonempty evidence_errors
+json_assert "Scenario C: both unavailable sources recorded" keys_include evidence_errors \
+  "mock_access_control,mock_schedule"
+json_assert "Scenario C: badge source is marked unavailable" list_contains_text \
+  explanation.missing_evidence "mock_access_control status unavailable"
+json_assert "Scenario C: schedule source is marked unavailable" list_contains_text \
+  explanation.missing_evidence "mock_schedule status unavailable"
 
 # Verify the explanation does not falsely claim "no badge exists"
 # (It must say evidence unavailable, not that badge was absent)
-json_assert "Scenario C: confidence reductions reflect unavailable sources" list confidence_reductions
+json_assert "Scenario C: explanation does not claim badge absence" list_lacks_text \
+  explanation.why "no verified badge"
 
 # Operator requests more context before deciding
 DECISION_C="$(make_json decision request_context rationale "Demo Scenario C: evidence unavailable, requesting additional context")"
@@ -315,16 +331,10 @@ check_status "Scenario C: operator can request context" 201
 printf '\n--- Scenario D: Conflicting evidence ---\n'
 info "Valid badge but not scheduled, restricted area — expect conflict shown, uncertain confidence"
 
-PAYLOAD_D='{"scenario_ids":["demo-scenario-d"]}'
-api_request POST "$BASE_URL/api/v1/simulator/events" "$PAYLOAD_D"
-check_status "Seed Scenario D" "200 201"
-EVENT_D="$("$PYTHON" - "$TMP_DIR/response.json" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f: d = json.load(f)
-items = d if isinstance(d, list) else d.get("results", [])
-print(items[0].get("event_id", items[0].get("id", "")))
-PY
-)"
+PAYLOAD_D="$(simulator_payload demo-scenario-d)"
+api_request POST "$BASE_URL/api/v1/simulator/generate" "$PAYLOAD_D"
+check_status "Seed Scenario D" 200
+EVENT_D="$(persisted_event_id)"
 [[ -n "$EVENT_D" ]] || die "Scenario D: no event_id returned"
 
 api_request POST "$BASE_URL/api/v1/events/$EVENT_D/assess" '{}'
@@ -337,6 +347,11 @@ api_request GET "$BASE_URL/api/v1/events/$EVENT_D/assessment"
 check_status "Scenario D: assessment retrievable" 200
 # Context summary should reflect conflict — check it has conflicts or missing sources
 json_assert "Scenario D: confidence reductions present" list confidence_reductions
+json_assert "Scenario D: evidence conflict is explicit" true context.has_conflicts
+json_assert "Scenario D: conflict details are present" len_ge context.conflicts 1
+json_assert "Scenario D: confidence records the conflict" list_has_reason \
+  confidence_reductions contradictory_evidence
+json_assert "Scenario D: confidence is reduced" lte confidence_score 0.85
 
 DECISION_D="$(make_json decision accept rationale "Demo Scenario D: conflict reviewed, access verified by operator on-site")"
 api_request POST "$BASE_URL/api/v1/events/$EVENT_D/decision" "$DECISION_D"
@@ -351,24 +366,21 @@ check_status "Scenario D: operator can record decision after reviewing conflict"
 printf '\n--- Scenario E: AI unavailable (deterministic fallback) ---\n'
 info "AI pipeline simulated as unavailable — deterministic risk/evidence must remain accessible"
 
-PAYLOAD_E='{"scenario_ids":["demo-scenario-e"]}'
-api_request POST "$BASE_URL/api/v1/simulator/events" "$PAYLOAD_E"
-check_status "Seed Scenario E" "200 201"
-EVENT_E="$("$PYTHON" - "$TMP_DIR/response.json" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f: d = json.load(f)
-items = d if isinstance(d, list) else d.get("results", [])
-print(items[0].get("event_id", items[0].get("id", "")))
-PY
-)"
+PAYLOAD_E="$(simulator_payload demo-scenario-e)"
+api_request POST "$BASE_URL/api/v1/simulator/generate" "$PAYLOAD_E"
+check_status "Seed Scenario E" 200
+EVENT_E="$(persisted_event_id)"
 [[ -n "$EVENT_E" ]] || die "Scenario E: no event_id returned"
 
 # Assessment always completes deterministically (AI is fallback by design)
 api_request POST "$BASE_URL/api/v1/events/$EVENT_E/assess" '{}'
 check_status "Scenario E: deterministic assessment succeeds even without AI" 200
 json_assert "Scenario E: risk score is numeric" number risk_score
-json_assert "Scenario E: risk level present" nonempty risk_level
+json_assert "Scenario E: risk level is medium" eq risk_level medium
 json_assert "Scenario E: human review required" true recommendation.requires_human_review
+json_assert "Scenario E: explanation uses deterministic fallback" eq explanation.source deterministic_fallback
+json_assert "Scenario E: AI unavailability reduces confidence" list_has_reason \
+  confidence_reductions llm_unavailable
 
 # Event must remain accessible in queue
 api_request GET "$BASE_URL/api/v1/events/$EVENT_E"
@@ -380,7 +392,7 @@ api_request GET "$BASE_URL/api/v1/events/$EVENT_E/review"
 check_status "Scenario E: coordinator review available via fallback" 200
 json_assert "Scenario E: fallback review is event-bound" eq event_id "$EVENT_E"
 json_assert "Scenario E: human review remains required" true human_review_required
-json_assert "Scenario E: source declares fallback path" nonempty source
+json_assert "Scenario E: source declares deterministic fallback" eq source deterministic_fallback
 
 # Operator can still manually record a decision
 DECISION_E="$(make_json decision reject rationale "Demo Scenario E: reviewed manually without AI; activity unauthorized")"
@@ -405,17 +417,29 @@ done
 
 printf '\n--- Simulator preview (usability check) ---\n'
 
-api_request GET "$BASE_URL/api/v1/simulator/scenarios"
-check_status "GET /simulator/scenarios returns scenario catalogue" 200
-json_assert "Scenario catalogue is a non-empty list" nonempty scenarios
+PREVIEW_PAYLOAD="$($PYTHON - "$RUN_INSTANCE" <<'PY'
+import json, sys
+print(json.dumps({
+    "scenario_ids": [
+        "demo-scenario-a", "demo-scenario-b", "demo-scenario-c",
+        "demo-scenario-d", "demo-scenario-e",
+    ],
+    "persist": False,
+    "instance_id": sys.argv[1],
+}, separators=(",", ":")))
+PY
+)"
+api_request POST "$BASE_URL/api/v1/simulator/generate" "$PREVIEW_PAYLOAD"
+check_status "POST /simulator/generate previews scenario catalogue" 200
+json_assert "Scenario catalogue is a non-empty list" nonempty events
 
 # Confirm the five Gate 23 scenarios appear in the catalogue
 "$PYTHON" - "$TMP_DIR/response.json" <<'PY' && pass "All 5 Gate 23 scenarios present in catalogue" || fail "Not all Gate 23 scenarios in catalogue"
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
-scenarios = data.get("scenarios", data) if isinstance(data, dict) else data
-ids = {s.get("id") for s in scenarios}
+scenarios = data.get("events", []) if isinstance(data, dict) else []
+ids = {s.get("scenario_id") for s in scenarios}
 required = {"demo-scenario-a", "demo-scenario-b", "demo-scenario-c", "demo-scenario-d", "demo-scenario-e"}
 raise SystemExit(0 if required <= ids else 1)
 PY

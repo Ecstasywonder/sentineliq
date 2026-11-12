@@ -1,8 +1,10 @@
 """
 Seed data for SentinelIQ MVP.
 
-Loads the v1.0 risk policy, default roles, a demo facility,
-locations, cameras, and mock contextual data.
+Loads the v1.0 risk policy, default roles, a sample facility,
+locations, cameras, and mock contextual data. Interactive users are not
+created unless an operator explicitly opts in and supplies credentials through
+the environment.
 
 Run via: python -m app.db.seed  (from backend/)
 """
@@ -11,11 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionLocal
 from app.models import (
@@ -34,6 +40,155 @@ from app.models import (
 from app.security.passwords import hash_password
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _InteractiveSeedAccount:
+    """Validated, externally supplied account configuration."""
+
+    config_name: str
+    email: str
+    password: str
+    full_name: str
+    role_name: str
+
+
+_INTERACTIVE_ACCOUNT_CONFIGS = (
+    {
+        "prefix": "SEED_INTERACTIVE_OPERATOR",
+        "full_name": "Seeded Operator",
+        "role_name": "officer",
+    },
+    {
+        "prefix": "SEED_INTERACTIVE_ADMIN",
+        "full_name": "Seeded Administrator",
+        "role_name": "platform_admin",
+    },
+)
+
+
+def _read_opt_in(value: str | None, *, name: str) -> bool:
+    normalized = (value or "").strip().lower()
+    if normalized in {"", "0", "false", "no", "off"}:
+        return False
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    raise RuntimeError(f"{name} must be an explicit boolean value")
+
+
+def _load_interactive_seed_accounts(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[_InteractiveSeedAccount, ...]:
+    """Load optional interactive users without providing credential defaults.
+
+    Supplying an email or password is not itself consent to create an account:
+    the matching ``*_ENABLED`` flag must also be explicitly true. All account
+    definitions are validated before any database changes are made.
+    """
+
+    env = os.environ if environ is None else environ
+    accounts: list[_InteractiveSeedAccount] = []
+
+    for config in _INTERACTIVE_ACCOUNT_CONFIGS:
+        prefix = config["prefix"]
+        enabled_name = f"{prefix}_ENABLED"
+        email_name = f"{prefix}_EMAIL"
+        password_name = f"{prefix}_PASSWORD"
+        enabled = _read_opt_in(env.get(enabled_name), name=enabled_name)
+        email = env.get(email_name, "").strip().lower()
+        password = env.get(password_name, "")
+
+        if not enabled:
+            configured_fields = [
+                name
+                for name, value in ((email_name, email), (password_name, password))
+                if value
+            ]
+            if configured_fields:
+                raise RuntimeError(
+                    f"{enabled_name} must be true when configuring "
+                    + ", ".join(configured_fields)
+                )
+            continue
+
+        if not email:
+            raise RuntimeError(f"{email_name} is required when {enabled_name}=true")
+        if (
+            len(email) > 320
+            or email.count("@") != 1
+            or any(character.isspace() for character in email)
+        ):
+            raise RuntimeError(f"{email_name} must be a valid email address")
+        if not password:
+            raise RuntimeError(f"{password_name} is required when {enabled_name}=true")
+        if not 12 <= len(password) <= 128:
+            raise RuntimeError(f"{password_name} must be between 12 and 128 characters")
+
+        accounts.append(
+            _InteractiveSeedAccount(
+                config_name=prefix,
+                email=email,
+                password=password,
+                full_name=config["full_name"],
+                role_name=config["role_name"],
+            )
+        )
+
+    emails = [account.email for account in accounts]
+    if len(emails) != len(set(emails)):
+        raise RuntimeError("Interactive seed account email addresses must be unique")
+    return tuple(accounts)
+
+
+async def _seed_interactive_accounts(
+    session: AsyncSession,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Create explicitly configured users while preserving existing state.
+
+    In particular, rerunning the seed never changes a pre-existing user's
+    password, roles, verification status, or active/disabled state.
+    """
+
+    accounts = _load_interactive_seed_accounts(environ)
+    if not accounts:
+        logger.info("seed.interactive_accounts_skipped")
+        return
+
+    for account in accounts:
+        existing = await session.scalar(select(User).where(User.email == account.email))
+        if existing is not None:
+            logger.info(
+                "seed.interactive_account_already_exists",
+                config=account.config_name,
+                email=account.email,
+                is_active=existing.is_active,
+            )
+            continue
+
+        role = await session.scalar(select(Role).where(Role.name == account.role_name))
+        if role is None:
+            raise RuntimeError(
+                f"Required role {account.role_name!r} is missing for {account.config_name}"
+            )
+
+        user = User(
+            email=account.email,
+            full_name=account.full_name,
+            hashed_password=hash_password(account.password),
+            is_active=True,
+            is_verified=True,
+        )
+        session.add(user)
+        await session.flush()
+        session.add(UserRole(user_id=user.id, role_id=role.id, granted_by="system:seed"))
+        await session.commit()
+        logger.info(
+            "seed.interactive_account_created",
+            config=account.config_name,
+            email=account.email,
+        )
 
 
 def _id() -> str:
@@ -458,57 +613,9 @@ async def seed() -> None:
         await session.commit()
         logger.info("seed.integration_health_done")
 
-        # Demo operator account — idempotent, only created if email is absent
-        demo_email = "demo@sentineliq.dev"
-        demo_password = "SentinelIQ-Demo-2026"
-        demo_role_name = "officer"
-        existing_demo = await session.scalar(select(User).where(User.email == demo_email))
-        if existing_demo is None:
-            demo_user = User(
-                email=demo_email,
-                full_name="Demo Operator",
-                hashed_password=hash_password(demo_password),
-                is_active=True,
-                is_verified=True,
-            )
-            session.add(demo_user)
-            await session.flush()  # get demo_user.id
-
-            demo_role = await session.scalar(select(Role).where(Role.name == demo_role_name))
-            if demo_role:
-                session.add(
-                    UserRole(user_id=demo_user.id, role_id=demo_role.id, granted_by="system:seed")
-                )
-            await session.commit()
-            logger.info("seed.demo_user_created", email=demo_email)
-        else:
-            logger.info("seed.demo_user_already_exists", email=demo_email)
-
-        # E2E smoke-test admin account (platform_admin) — idempotent
-        e2e_email = "e2e-admin@sentineliq.dev"
-        e2e_password = "SentinelIQ-E2E-Admin-2026"
-        e2e_role_name = "platform_admin"
-        existing_e2e = await session.scalar(select(User).where(User.email == e2e_email))
-        if existing_e2e is None:
-            e2e_user = User(
-                email=e2e_email,
-                full_name="E2E Admin",
-                hashed_password=hash_password(e2e_password),
-                is_active=True,
-                is_verified=True,
-            )
-            session.add(e2e_user)
-            await session.flush()
-
-            e2e_role = await session.scalar(select(Role).where(Role.name == e2e_role_name))
-            if e2e_role:
-                session.add(
-                    UserRole(user_id=e2e_user.id, role_id=e2e_role.id, granted_by="system:seed")
-                )
-            await session.commit()
-            logger.info("seed.e2e_admin_created", email=e2e_email)
-        else:
-            logger.info("seed.e2e_admin_already_exists", email=e2e_email)
+        # Interactive accounts are opt-in and never have repository-defined
+        # credentials. Existing accounts are deliberately left unchanged.
+        await _seed_interactive_accounts(session)
 
     logger.info("seed.complete")
 

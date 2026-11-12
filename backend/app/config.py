@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     orchestrate_context_agent_id: str = ""
     orchestrate_explanation_agent_id: str = ""
     orchestrate_coordinator_agent_id: str = ""
+    # OAuth2 client credentials used only by watsonx Orchestrate to obtain a
+    # short-lived, purpose-bound ``tools:read`` token. The client secret is
+    # injected by the deployment secret store and SecretStr prevents it from
+    # appearing in settings representations or validation logs.
+    orchestrate_tools_client_id: str = ""
+    orchestrate_tools_client_secret: SecretStr = SecretStr("")
 
     # -------------------------------------------------------------------------
     # IBM watsonx.ai (Path A — verified fallback)
@@ -140,6 +146,14 @@ class Settings(BaseSettings):
         return bool(self.orchestrate_url and self.effective_orchestrate_api_key)
 
     @property
+    def orchestrate_tools_oauth_configured(self) -> bool:
+        """True when both service OAuth client-credential values are present."""
+        return bool(
+            self.orchestrate_tools_client_id
+            and self.orchestrate_tools_client_secret.get_secret_value()
+        )
+
+    @property
     def watsonx_active(self) -> bool:
         """True when the watsonx.ai Chat API is usable (Path A)."""
         if self.app_env == "test" or "PYTEST_CURRENT_TEST" in os.environ:
@@ -186,6 +200,9 @@ class Settings(BaseSettings):
     enable_semantic_search: bool = True
     enable_agent_tracing: bool = True
     enable_rate_limiting: bool = True
+    # The deterministic fixture API is for controlled validation only. It is
+    # deliberately forbidden in production by the validator below.
+    enable_simulator_api: bool = True
 
     # -------------------------------------------------------------------------
     # Rate limiting
@@ -260,6 +277,19 @@ class Settings(BaseSettings):
                     + ", ".join(invalid_agent_ids)
                 )
 
+        oauth_secret = self.orchestrate_tools_client_secret.get_secret_value()
+        if bool(self.orchestrate_tools_client_id) != bool(oauth_secret):
+            raise ValueError(
+                "ORCHESTRATE_TOOLS_CLIENT_ID and ORCHESTRATE_TOOLS_CLIENT_SECRET "
+                "must be configured together"
+            )
+        if self.orchestrate_tools_client_id and not 3 <= len(
+            self.orchestrate_tools_client_id
+        ) <= 128:
+            raise ValueError("ORCHESTRATE_TOOLS_CLIENT_ID must be 3 to 128 characters")
+        if oauth_secret and len(oauth_secret) < 32:
+            raise ValueError("ORCHESTRATE_TOOLS_CLIENT_SECRET must be at least 32 characters")
+
         if self.app_env != "production":
             return self
 
@@ -272,6 +302,8 @@ class Settings(BaseSettings):
         }
         if self.debug:
             errors.append("DEBUG must be false in production")
+        if self.enable_simulator_api:
+            errors.append("ENABLE_SIMULATOR_API must be false in production")
         if self.secret_key in insecure_secret_values or len(self.secret_key) < 32:
             errors.append("SECRET_KEY must be a non-default value of at least 32 characters")
         if "changeme" in self.database_url.lower() or "changeme" in self.database_url_sync.lower():
@@ -280,6 +312,15 @@ class Settings(BaseSettings):
             errors.append("CORS_ORIGINS must be an explicit, non-wildcard allow-list")
         if any(origin.startswith("http://localhost") for origin in self.cors_origins):
             errors.append("CORS_ORIGINS must not include localhost in production")
+        if (
+            self.orchestrate_url
+            and self.effective_orchestrate_api_key
+            and not self.orchestrate_tools_oauth_configured
+        ):
+            errors.append(
+                "ORCHESTRATE_TOOLS_CLIENT_ID and ORCHESTRATE_TOOLS_CLIENT_SECRET are required "
+                "when Orchestrate is active in production"
+            )
 
         if errors:
             raise ValueError("Invalid production configuration: " + "; ".join(errors))

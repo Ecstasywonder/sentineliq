@@ -3,6 +3,7 @@ Authentication endpoints — Gate 6.
 
 Routes:
     POST /api/v1/auth/token    Login — issue access + refresh tokens
+    POST /api/v1/auth/service-token  OAuth2 client-credentials service token
     POST /api/v1/auth/refresh  Exchange refresh token for new access token
     POST /api/v1/auth/logout   Revoke the presented refresh-token family
     GET  /api/v1/auth/me       Return current user identity
@@ -11,10 +12,13 @@ Routes:
 from __future__ import annotations
 
 import hashlib
+import secrets
+from typing import Annotated
 from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Response, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,18 +26,27 @@ from app.config import get_settings
 from app.db.session import get_db
 from app.models.refresh_token import RefreshToken, RefreshTokenFamily
 from app.models.user import Role, User, UserRole
-from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse, UserInfo
+from app.schemas.auth import (
+    LoginRequest,
+    RefreshRequest,
+    ServiceTokenResponse,
+    TokenResponse,
+    UserInfo,
+)
 from app.security.dependencies import CurrentUser
 from app.security.passwords import verify_password_or_dummy
+from app.security.rbac import SERVICE_PURPOSE_POLICIES
 from app.security.tokens import (
     TokenError,
     create_access_token,
+    create_service_access_token,
     decode_refresh_token_claims,
     issue_refresh_token,
 )
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+_service_basic = HTTPBasic(auto_error=False)
 
 
 def _token_hash(token: str) -> str:
@@ -56,6 +69,23 @@ async def _load_user_roles(session: AsyncSession, user_id: str) -> list[str]:
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+def _oauth_error(
+    status_code: int,
+    error: str,
+    description: str,
+    *,
+    authenticate: bool = False,
+) -> HTTPException:
+    headers = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+    if authenticate:
+        headers["WWW-Authenticate"] = 'Basic realm="sentineliq-orchestrate-tools"'
+    return HTTPException(
+        status_code=status_code,
+        detail={"error": error, "error_description": description},
+        headers=headers,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +166,91 @@ async def login(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=s.access_token_expire_minutes * 60,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/auth/service-token — OAuth2 client credentials
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/service-token",
+    response_model=ServiceTokenResponse,
+    summary="Issue a purpose-bound Orchestrate tools token",
+    status_code=200,
+)
+async def service_token(
+    response: Response,
+    grant_type: Annotated[str, Form()],
+    scope: Annotated[str | None, Form()] = None,
+    credentials: Annotated[HTTPBasicCredentials | None, Depends(_service_basic)] = None,
+    session: AsyncSession = Depends(get_db),
+) -> ServiceTokenResponse:
+    """Implement OAuth2 client credentials for the Orchestrate team connection.
+
+    The configured client secret authenticates only the token request. Issued
+    JWTs remain short-lived and are additionally restricted by audience,
+    purpose, the active service identity, and its database role.
+    """
+    if grant_type != "client_credentials":
+        raise _oauth_error(400, "unsupported_grant_type", "grant_type must be client_credentials")
+
+    requested_scopes = set(scope.split()) if scope else {"tools:read"}
+    if requested_scopes != {"tools:read"}:
+        raise _oauth_error(400, "invalid_scope", "Only the tools:read scope is available")
+
+    settings = get_settings()
+    expected_id = settings.orchestrate_tools_client_id
+    expected_secret = settings.orchestrate_tools_client_secret.get_secret_value()
+    if not settings.orchestrate_tools_oauth_configured:
+        logger.error("auth.service_token_unconfigured")
+        raise _oauth_error(503, "temporarily_unavailable", "Service authentication unavailable")
+
+    provided_id = credentials.username if credentials is not None else ""
+    provided_secret = credentials.password if credentials is not None else ""
+    id_matches = secrets.compare_digest(provided_id.encode(), expected_id.encode())
+    secret_matches = secrets.compare_digest(provided_secret.encode(), expected_secret.encode())
+    if credentials is None or not (id_matches and secret_matches):
+        raise _oauth_error(
+            401,
+            "invalid_client",
+            "Client authentication failed",
+            authenticate=True,
+        )
+
+    result = await session.execute(
+        select(User).where(
+            User.service_purpose == "orchestrate_tools",
+            User.is_active.is_(True),
+        )
+    )
+    service_users = list(result.scalars().all())
+    if len(service_users) != 1:
+        logger.error("auth.service_identity_unavailable", purpose="orchestrate_tools")
+        raise _oauth_error(503, "temporarily_unavailable", "Service identity unavailable")
+
+    service_user = service_users[0]
+    roles = await _load_user_roles(session, service_user.id)
+    required_role, allowed_permissions = SERVICE_PURPOSE_POLICIES["orchestrate_tools"]
+    if set(roles) != {required_role} or allowed_permissions != frozenset({"tools:read"}):
+        logger.error(
+            "auth.service_identity_role_invalid",
+            user_id=service_user.id,
+            purpose="orchestrate_tools",
+        )
+        raise _oauth_error(503, "temporarily_unavailable", "Service identity unavailable")
+
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    logger.info("auth.service_token_issued", user_id=service_user.id, scope="tools:read")
+    return ServiceTokenResponse(
+        access_token=create_service_access_token(
+            service_user.id,
+            [required_role],
+            "orchestrate_tools",
+        ),
+        expires_in=settings.access_token_expire_minutes * 60,
     )
 
 

@@ -54,8 +54,10 @@ and [source-of-truth hierarchy](source-of-truth.md).
 
 ### Platform and transport
 
-- Caddy was installed and configured on EC2 as the HTTPS reverse proxy for
-  the backend API, including health handling and API proxying.
+- Caddy was installed and configured on EC2 as the systemd-managed HTTPS proxy
+  for the frontend application, API, health, and readiness routes. It is the
+  intended team access path once its public host and deployed revision have
+  been revalidated.
 - A publicly trusted short-lived certificate for the current public IP was
   obtained successfully. The public IP is not an Elastic IP, so a stable EIP
   or DNS name remains a deployment hardening recommendation.

@@ -150,6 +150,7 @@ class ContextService:
         evidence: Any,  # AggregatedEvidence from EvidenceAggregator
         *,
         timeout: float | None = None,
+        force_deterministic: bool = False,
     ) -> ContextResult:
         """
         Interpret evidence for a security event.
@@ -171,6 +172,8 @@ class ContextService:
         t0 = time.monotonic()
         attempt_records: list[dict[str, Any]] = []
         attempt_errors: list[str] = []
+        if force_deterministic:
+            attempt_errors.append("AI unavailable in trusted simulator scenario")
 
         # Serialise the evidence package for the LLM
         evidence_payload = self._serialise_evidence(evidence)
@@ -183,7 +186,7 @@ class ContextService:
         }
 
         # ---- PATH B: watsonx Orchestrate SaaS --------------------------------
-        if settings.orchestrate_active:
+        if settings.orchestrate_active and not force_deterministic:
             attempt_started = time.monotonic()
             try:
                 raw, tool_calls = await self._invoke_orchestrate_saas(
@@ -227,7 +230,7 @@ class ContextService:
                 )
 
         # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
-        if settings.watsonx_active:
+        if settings.watsonx_active and not force_deterministic:
             attempt_started = time.monotonic()
             try:
                 raw, tool_calls = await self._invoke_watsonx_ai(input_payload, effective_timeout)
@@ -270,7 +273,11 @@ class ContextService:
 
         # ---- PATH 0: Deterministic fallback ----------------------------------
         duration_ms = (time.monotonic() - t0) * 1000
-        neither = not settings.orchestrate_active and not settings.watsonx_active
+        neither = (
+            not force_deterministic
+            and not settings.orchestrate_active
+            and not settings.watsonx_active
+        )
         path0_status = "skipped" if neither else "failed_fallback"
 
         result = self._deterministic_context(event_id, required_context, evidence)

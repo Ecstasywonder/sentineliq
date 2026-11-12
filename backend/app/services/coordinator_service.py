@@ -83,7 +83,12 @@ class CoordinatorService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def run(self, event_id: str) -> CoordinatorReview:
+    async def run(
+        self,
+        event_id: str,
+        *,
+        force_deterministic: bool = False,
+    ) -> CoordinatorReview:
         """
         Run a Coordinator review for *event_id*.
 
@@ -107,10 +112,16 @@ class CoordinatorService:
         start_mono = time.monotonic()
 
         try:
-            result = await self._invoke(event_id, run_id)
-            source = result.source
-            status = "success"
-            error_message = None
+            if force_deterministic:
+                result = await self._deterministic_fallback(event_id, run_id)
+                source = result.source
+                status = "fallback"
+                error_message = "AI unavailable in trusted simulator scenario"
+            else:
+                result = await self._invoke(event_id, run_id)
+                source = result.source
+                status = "fallback" if source == "deterministic_fallback" else "success"
+                error_message = None
         except Exception as exc:
             logger.warning(
                 "coordinator_service.all_paths_failed",

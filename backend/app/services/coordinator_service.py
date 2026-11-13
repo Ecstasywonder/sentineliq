@@ -70,7 +70,8 @@ _COORDINATOR_SYSTEM_PROMPT = (
     "validation to each configured specialist collaborator: Triage, Context, and "
     "Explanation. Treat their responses as advisory and never alter persisted "
     "deterministic values. If a collaborator is unavailable, continue from the "
-    "persisted bundle without inventing a result. "
+    "persisted bundle without inventing a result. Never repeat a collaborator "
+    "claim unless the exact value appears in the persisted bundle. "
     "Preserve all deterministic values exactly. "
     "End your response with a clear statement that human review is required. "
     "Return valid JSON only — no prose, no markdown fences. "
@@ -219,11 +220,37 @@ class CoordinatorService:
                 )
             )
 
-        return self._parse_and_validate(event_id, content, run_id, source="orchestrate")
+        # Validate the agent's structured response, but do not expose its prose
+        # or derived fields directly. Collaborators are advisory and may return
+        # claims that are absent from the persisted assessment. Rebuild every
+        # operator-facing field from the authoritative server-side bundle.
+        self._parse_and_validate(event_id, content, run_id, source="orchestrate")
+        return self._grounded_review_from_bundle(
+            event_id,
+            bundle,
+            run_id,
+            source="orchestrate",
+        )
 
     async def _deterministic_fallback(self, event_id: str, run_id: str) -> CoordinatorReview:
         """PATH 0 — build a review from persisted assessment rows, no LLM."""
         bundle = await self._load_assessment_bundle(event_id)
+        return self._grounded_review_from_bundle(
+            event_id,
+            bundle,
+            run_id,
+            source="deterministic_fallback",
+        )
+
+    def _grounded_review_from_bundle(
+        self,
+        event_id: str,
+        bundle: dict[str, Any],
+        run_id: str,
+        *,
+        source: str,
+    ) -> CoordinatorReview:
+        """Build operator-facing fields only from persisted server data."""
         event = bundle.get("event", {})
         assessment = bundle.get("assessment", {})
 
@@ -257,7 +284,7 @@ class CoordinatorService:
             summary=summary,
             missing_evidence=missing_evidence[:64],
             human_review_required=True,
-            source="deterministic_fallback",
+            source=source,
             agent_run_id=run_id,
         )
 

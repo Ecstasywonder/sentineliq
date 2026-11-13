@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -404,6 +405,45 @@ class TestCoordinatorServiceRun:
         result = await svc.run(evt.id)
 
         assert result.event_id == evt.id
+
+    async def test_orchestrate_review_uses_persisted_fields_not_agent_claims(
+        self, db_session: AsyncSession
+    ) -> None:
+        evt = await _make_event(db_session)
+        await _make_assessment(
+            db_session,
+            evt.id,
+            evidence_errors={"access_control": "timeout"},
+        )
+        svc = CoordinatorService(db_session)
+        svc._settings = SimpleNamespace(
+            orchestrate_url="https://tenant.watson-orchestrate.cloud.ibm.com",
+            effective_orchestrate_api_key="test-key",
+            agent_invoke_timeout=30.0,
+            orchestrate_coordinator_agent_id=str(uuid.uuid4()),
+        )
+        untrusted = json.dumps(
+            {
+                "event_id": evt.id,
+                "assessment_ready": False,
+                "summary": "Triage invented authorized_access with no evidence.",
+                "missing_evidence": ["invented_source"],
+                "human_review_required": True,
+            }
+        )
+
+        with patch(
+            "app.services.orchestrate_client.OrchestrateClient.chat",
+            new_callable=AsyncMock,
+            return_value=(untrusted, []),
+        ):
+            result = await svc._invoke_orchestrate(evt.id, _uid())
+
+        assert result.source == "orchestrate"
+        assert result.assessment_ready is True
+        assert "authorized_access" not in result.summary
+        assert "person_detected" in result.summary
+        assert result.missing_evidence == ["access_control"]
 
 
 # ---------------------------------------------------------------------------

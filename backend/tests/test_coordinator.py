@@ -42,7 +42,7 @@ from app.models.agent_run import AgentRun
 from app.models.assessment import RiskAssessment
 from app.models.event import SecurityEvent
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
-from app.services.coordinator_service import CoordinatorService, _COORDINATOR_SYSTEM_PROMPT
+from app.services.coordinator_service import _COORDINATOR_SYSTEM_PROMPT, CoordinatorService
 
 pytestmark = pytest.mark.asyncio
 

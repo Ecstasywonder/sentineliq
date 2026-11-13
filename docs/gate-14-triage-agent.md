@@ -7,7 +7,8 @@
 
 > **Gate numbering:** This report retains the original roadmap label. It implements
 > Gate 11 (Triage Agent) in the canonical [Master Build Prompt](master-build-prompt.md).
-> Live watsonx Orchestrate tenant validation remains outstanding.
+> Live watsonx Orchestrate validation completed on EC2 on 2026-11-13. Final
+> merge, CI, and deployed-revision regression evidence remains required.
 
 ---
 
@@ -202,13 +203,17 @@ SELECT id, agent_name, status, duration_ms, source FROM agent_runs ORDER BY crea
 
 ## Known Limitations
 
-1. **Orchestrate integration not live-tested** — The Orchestrate HTTP call in `_invoke_orchestrate()` uses the `/v1/chat/completions` endpoint with `agent_id`. The exact endpoint path may differ for the specific Orchestrate tenant version. The path must be confirmed against the live tenant before declaring Gate 14 live-validated.
+1. **Live evidence is not final deployment evidence** — A fresh EC2 event
+   completed with Triage source `orchestrate`. The observed tenant UUID is
+   `76daed62-455c-4999-93b1-8ab7aff82c31`; re-import can change it. Repeat the
+   proof after the Path-A-removal candidate merges, passes CI, and is deployed.
 
-2. **No `agent_id` / skill registration** — `agent.yaml` describes the agent but has not been imported into the Orchestrate tenant. This requires `orchestrate agents import --file agents/triage/agent.yaml` to be run on an environment with the ADK CLI configured.
+2. **`repeated_event` signal not implemented** — Requires incident history to
+   detect duplicate events.
 
-3. **`repeated_event` signal not implemented** — Requires incident history to detect duplicate events. Will be addressed in Gate 15 (Context Agent).
-
-4. **Orchestrate space ID** — `orchestrate_space_id` is passed as `space_id` in the payload if set. Verify this against the actual tenant's API.
+3. **Fallback proof remains required** — The deployed revision must show an
+   Orchestrate failure returning deterministic output without a direct watsonx.ai
+   chat attempt.
 
 ---
 
@@ -226,7 +231,7 @@ SELECT id, agent_name, status, duration_ms, source FROM agent_runs ORDER BY crea
 | `agent_run_id` stored on `SecurityEvent` | ✅ |
 | `triage` field included in `AssessmentResponse` | ✅ |
 | 46 new tests added | ✅ |
-| Existing test suite unaffected | ✅ (verified locally — syntax clean) |
+| Existing test suite unaffected | ⚠️ EC2 focused regression evidence exists; rerun after final merge/deploy |
 | ADR-007 written | ✅ |
 
 ---

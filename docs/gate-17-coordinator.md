@@ -30,7 +30,7 @@ Per the master build prompt (§14.1) and master gate plan Gate 17:
 |-----|-------------|--------|
 | §14.1 | Coordinator receives event-assessment request and delegates to specialists | ✅ (read-only review, not write-path assessment) |
 | §14.1 | Must preserve human-review state | ✅ (`human_review_required=True` always enforced) |
-| §14.1 | Coordinator must not invent evidence | ✅ (only reads persisted rows + allowlist filtering) |
+| §14.1 | Coordinator must not invent evidence | ✅ (agent output validated, then operator fields rebuilt from persisted rows) |
 | §33 | Coordinator has read-only tool access | ✅ (`get_event_detail` + `get_assessment_bundle` only) |
 | §34 | Agent invocation, run ID, latency captured | ✅ (`AgentRun` row persisted for every call) |
 | §10 | AI unavailable → event not lost | ✅ (deterministic fallback always returns `CoordinatorReview`) |
@@ -45,7 +45,7 @@ Per the master build prompt (§14.1) and master gate plan Gate 17:
 | Deliverable | File | Status |
 |---|---|---|
 | Coordinator schemas | `backend/app/schemas/coordinator.py` | ✅ |
-| CoordinatorService (2-path: Orchestrate + deterministic) | `backend/app/services/coordinator_service.py` | ✅ |
+| CoordinatorService (Orchestrate + deterministic) | `backend/app/services/coordinator_service.py` | ✅; current grounding fix pending merge/deploy |
 | GET `/api/v1/events/{id}/review` endpoint | `backend/app/api/v1/endpoints/coordinator.py` | ✅ |
 | Router registration | `backend/app/api/v1/router.py` | ✅ |
 | 37 tests | `backend/tests/test_coordinator.py` | ✅ |
@@ -204,11 +204,19 @@ WHERE agent_name = 'sentinel_coordinator' ORDER BY created_at DESC LIMIT 5;
 
 ## Known Limitations
 
-1. **Live Orchestrate validation pending** — The `_invoke_orchestrate()` path requires `ORCHESTRATE_URL` and `ORCHESTRATE_COORDINATOR_AGENT_ID` to be configured on EC2. The existing Coordinator UUID from the handoff document (`98c49c40-3cce-4372-9030-14a71f400062`) should be used as the starting point; confirm it is still deployed before activating.
+1. **Live validation is complete but must be repeated after deployment** — On
+   2026-11-13 Coordinator executed event-detail and assessment tools and made
+   bounded calls to all three declared collaborators. Its observed UUID is
+   `0e56991e-cd11-4f77-812f-ced7b31aeac7`; re-import can change it. Repeat this
+   proof after merge, CI, and deployment of the grounding fix.
 
 2. **No Path A (watsonx.ai)** — The Coordinator is designed for Orchestrate's collaborator-agent architecture. It does not have a watsonx.ai fallback — the deterministic fallback is the safety net.
 
-3. **Coordinator collaborator agents** — The `agents/coordinator/agent.yaml` lists `sentinel_triage_agent`, `sentinel_context_agent`, `sentinel_explanation_agent` as collaborators. These must all be deployed in the same Orchestrate tenant for the coordinator to delegate to them.
+3. **Structured output compatibility** — ReAct Core does not support native
+   `structured_output`. The agent's exact JSON schema is in its instructions;
+   backend Pydantic validation and persisted-data reconstruction enforce the
+   contract. The latter prevents collaborator hallucinations from becoming
+   operator-facing facts.
 
 ---
 
@@ -225,7 +233,7 @@ WHERE agent_name = 'sentinel_coordinator' ORDER BY created_at DESC LIMIT 5;
 | `GET /api/v1/events/{id}/review` returns 200 for reviewable events | ✅ |
 | 409 returned for non-reviewable status | ✅ |
 | 37 new tests added | ✅ |
-| Existing test suite unaffected | ✅ (syntax verified) |
+| Existing test suite unaffected | ⚠️ EC2 focused regression evidence exists; rerun after final merge/deploy |
 
 ---
 

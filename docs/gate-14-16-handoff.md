@@ -1,188 +1,100 @@
 # Gate 14–16 Engineering Handoff
 
-**Status date:** 2026-11-12
-**Status:** living handoff; Gate 14 remains pending live-runtime evidence  
-**Validation rule:** perform installations and tests on the EC2 environment only.
+**Status date:** 2026-11-13
+**Status:** implementation evidence is current; final merge, CI, and deployment evidence remains required where noted
+**Validation rule:** installations and tests run on EC2 only.
 
-This document is the sanitized operational handoff for the current canonical
-Gate 14 work (Coordinator and end-to-end agent workflow) and transition to
-Gates 15–16. It supplements, rather than replaces, the canonical
-[Master Build Prompt](master-build-prompt.md), [Master Gate Plan](master-gate-plan.md),
-and [source-of-truth hierarchy](source-of-truth.md).
+This handoff supplements the canonical [Master Build Prompt](master-build-prompt.md),
+[Master Gate Plan](master-gate-plan.md), and [source-of-truth hierarchy](source-of-truth.md).
 
-## Evidence verified so far
+## Confirmed EC2 evidence
 
-### Runtime and deployment
+Watsonx Orchestrate Path B is now proven in the live tenant. A new event,
+`06b46f4d-76df-4979-b22b-d24aa60a30fb`, completed the backend assessment with
+Triage, Context, and Explanation all recorded as `orchestrate`; the event
+remained `awaiting_review` and therefore required human review. Risk and
+confidence continued to be determined by the server's deterministic engines.
 
-- An IBM watsonx Orchestrate SaaS environment is configured from the EC2-only
-  runtime environment; credentials remain in ignored environment files and
-  are not documented here.
-- The Orchestrate ADK is installed on EC2 and an active working environment
-  was registered for this Gate 14 validation.
-- An older SentinelIQ read-only tool set and four agents were imported during
-  the prior Gate 14 work. Those tenant assets are now stale relative to the
-  OAuth-protected, event-bound ten-tool contract in candidate `993c0fe` and
-  must not be treated as current acceptance evidence. The tenant snapshot
-  observed on 2026-11-12 used these runtime identifiers:
+Context directly called its event-detail tool through the OAuth-protected
+SentinelIQ API and returned valid JSON. Coordinator executed its read-only
+event/assessment tools and delegated to the Triage, Context, and Explanation
+collaborators. This is live tool and collaborator execution evidence, not just
+agent-definition import evidence.
 
-  | Agent | Runtime UUID |
-  |---|---|
-  | Triage | `76daed62-455c-4999-93b1-8ab7aff82c31` |
-  | Context | `49216ec7-117f-4547-8bd5-9756aef3f523` |
-  | Explanation | `093479ec-41e9-43d8-89b3-28d1cbffa75f` |
-  | Coordinator | `98c49c40-3cce-4372-9030-14a71f400062` |
+The working runtime model is `groq/openai/gpt-oss-120b` within watsonx
+Orchestrate. The tested Granite model emitted tool-call arguments as JSON
+strings rather than objects, so it did not satisfy the agent tool contract.
 
-  Re-importing an agent can create a new UUID; confirm the active identifiers
-  before changing the EC2 runtime configuration.
-- The backend was rebuilt from source on EC2. Runtime image construction was
-  checked so ignored environment files and private-key material are not baked
-  into the image.
-- The candidate migration chain was validated on a disposable EC2 PostgreSQL
-  database through `0006_unique_service_purpose`, including downgrade to base
-  and re-upgrade. The currently running shared deployment remains an older
-  build until the candidate merges and is deliberately redeployed.
+| Agent | Current tenant UUID |
+|---|---|
+| Triage | `76daed62-455c-4999-93b1-8ab7aff82c31` |
+| Context | `29220055-2483-4d4f-9efc-2f0ff93d457a` |
+| Explanation | `093479ec-41e9-43d8-89b3-28d1cbffa75f` |
+| Coordinator | `0e56991e-cd11-4f77-812f-ced7b31aeac7` |
 
-### Orchestrate invocation contract
+Re-importing can change these UUIDs. Treat them as evidence to reconfirm, not
+as values to place in version-controlled configuration.
 
-- The live tenant accepts the service endpoint form
-  `/v1/orchestrate/<agent-uuid>/chat/completions` at the HTTP layer.
-- Backend configuration and client validation now require the supported `v1`
-  runtime contract and canonical UUID agent identifiers when Orchestrate is
-  enabled.
-- Connection configuration was extended so the SentinelIQ API connection is
-  represented for both `draft` and `live` environments. The import script
-  provisions that connection shape and the contract test asserts it.
+## Architecture now in force
 
-### Platform and transport
+Path B (watsonx Orchestrate) is the sole remote LLM architecture. The direct
+watsonx.ai Chat API fallback is being removed; the deterministic fallback is
+retained as the safe, non-LLM behavior for Orchestrate configuration, transport,
+or response-validation failures. Watsonx may still be used independently for
+embeddings; that is not a generation fallback.
 
-- Caddy was installed and configured on EC2 as the systemd-managed HTTPS proxy
-  for the frontend application, API, health, and readiness routes. It is the
-  intended team access path once its public host and deployed revision have
-  been revalidated.
-- A publicly trusted short-lived certificate for the current public IP was
-  obtained successfully. The public IP is not an Elastic IP, so a stable EIP
-  or DNS name remains a deployment hardening recommendation.
+ReAct Core does not support native `structured_output`. Each agent therefore
+contains its exact JSON schema in its instructions, and strict backend Pydantic
+validation remains the enforcement boundary. Context uses `react_intrinsic`,
+explicit read-only tools, and no peer collaborators. Coordinator uses the same
+agent style, explicit tools, and bounded read-only collaborators.
 
-### Candidate verification completed on EC2
+The current candidate also grounds Coordinator output in the persisted server
+assessment bundle after schema validation, so collaborator text cannot inject
+invented evidence into operator-facing reviews.
 
-- Commit `993c0fe`: 816 backend tests passed, 3 skipped, with 91% coverage;
-  the focused security/configuration/simulator/tool suite passed 103 tests.
-- Frontend format, typecheck, lint, 57 unit tests, and production build passed.
-- Gate 23 passed 73/73 assertions and the deterministic Gate 24 smoke passed
-  108/108 checks on disposable EC2 stacks.
-- GitHub Actions run `43232697244` passed backend, frontend, Gitleaks, Trivy,
-  and the aggregate CI gate.
+## Deployment and access state
 
-## Current live-runtime state and blocker
+- Caddy is enabled as a systemd service on EC2. The live team URL is
+  [https://54.164.137.222/](https://54.164.137.222/); public `/` and `/health`
+  returned 200, and a protected API endpoint returned 401 without credentials.
+- The host does not have an Elastic IP. Caddy survives service restart and host
+  reboot, but an EC2 stop/start can change this IP; an EIP or DNS name is still
+  required for durable external identity.
+- A refresh-token persistence defect was identified in the currently deployed
+  backend: `refresh_tokens` could be flushed before its parent
+  `refresh_token_families` record, causing the foreign-key error after nominal
+  login. The candidate explicitly flushes the parent before the child and adds
+  a regression test. It is **not live until that candidate is deployed**.
 
-**Observed evidence on 2026-11-12:** the SentinelIQ-owned Groq probe returned
-`PROBE_OK`; the Granite probe returned valid JSON; and the currently deployed
-Triage, Context, and Explanation specialists returned valid JSON when called
-with the actual backend prompts. The earlier generic-error evidence therefore
-does not establish a current tenant-wide or model-wide outage.
+## Remaining exit conditions
 
-**Remaining blocker:** the live tenant definitions do not match candidate
-`993c0fe`. Context has no current event-bound tool set/structured contract and
-Coordinator has no current collaborators and stale tool references. The new
-OAuth team connection and ten approved GET tools also depend on the candidate
-API being deployed. Direct specialist prompts are useful isolation evidence,
-but do not prove tool execution, collaborator execution, or the complete
-backend Path B workflow.
+1. Merge the active candidate, pass GitHub Actions, and deploy that exact
+   revision to EC2.
+2. Re-run focused backend tests on EC2, including the auth family-order,
+   Coordinator grounding, and Path-A-removal suites; then run the required
+   broader quality gates.
+3. Verify real HTTPS login, `/auth/me`, and refresh-token rotation after the
+   deployed auth fix. Do not distribute test credentials until this passes.
+4. Force an Orchestrate failure and demonstrate deterministic fallback with no
+   direct watsonx.ai chat attempt.
+5. Re-run a fresh event and Coordinator review on the deployed revision,
+   retain sanitized `AgentRun`/tool evidence, and update the gate plan only
+   after the merge/CI/deployment chain is complete.
 
-**Required proof:** after the candidate API is deployed, import and deploy only
-the four SentinelIQ definitions and approved tool bundle, update the ignored
-runtime UUID settings, then capture a fresh event whose specialist sources are
-`orchestrate` plus a Coordinator run showing real event-bound tool and
-collaborator telemetry.
+## Gate 15 and Gate 16 implications
 
-## Architecture decision now in force
+Gate 15's decision, escalation, audit, and feedback workflow remains complete:
+the newly proven agent path still ends in `awaiting_review` and does not bypass
+human authority. Gate 16's dashboard remains a validated implementation
+candidate. Its final operational demonstration depends on the deployment and
+login verification above; the UI must continue to show agent provenance,
+fallback/error state, recommendation, and the human-review requirement without
+exposing runtime secrets or raw internal errors.
 
-Path B, watsonx Orchestrate, is the intended and sole LLM architecture. Once
-its live execution produces valid specialist output, remove the automatic
-watsonx.ai (Path A) fallback rather than silently changing providers. Keep the
-deterministic fallback as a non-LLM safety behavior: it preserves the event,
-does not fabricate AI output, and continues to require human review where the
-workflow requires it.
+## Source-control and sensitive-data boundary
 
-Until Path B has been demonstrated functional, do not remove the existing
-fallback implementation prematurely; it currently preserves safe operation
-while the Orchestrate runtime defect is isolated. Update ADR-008 and the older
-agent reports when Path A removal is implemented, so documentation no longer
-describes dual-provider routing as the target architecture.
-
-## Remaining Gate 14 exit criteria
-
-Gate 14 is **pending** until all of the following are evidenced on EC2:
-
-1. Import the candidate OAuth connection, tools, and four agent definitions;
-   verify the active tenant definitions match the checked-in contracts.
-2. Run a new synthetic event through the complete backend path and show all
-   three specialist sources as `orchestrate`, with persisted `AgentRun` and
-   tool-call observability.
-3. Invoke the deployed Coordinator as a read-only reviewer and retain
-   sanitized run/tool evidence. The transactional workflow authority remains
-   the backend `AssessmentService`.
-4. Remove the watsonx.ai Path A fallback, update targeted tests and
-   configuration/docs, and demonstrate the retained deterministic safety path
-   for Orchestrate failure.
-5. Run the focused regression suite on EC2 again after Path A removal, then run
-   the broader relevant quality gates.
-6. Update the canonical gate plan/source-of-truth only after the above evidence
-   is available and the changes have passed CI on the pushed commit.
-
-## Gate 15 and Gate 16 handoff
-
-### Gate 15 — Human-review workflow
-
-The canonical Gate 15 backend workflow is already recorded as complete in the
-Master Gate Plan: decision, escalation, audit, and feedback APIs are present.
-Its entry condition from Gate 14 is an assessment that remains reviewable by a
-human regardless of model health. The current synthetic run demonstrates the
-safe state (`awaiting_review` and human review required), but final Gate 14
-evidence must confirm the same behavior with live Orchestrate specialist
-output and Coordinator review.
-
-### Gate 16 — Operator dashboard foundation
-
-The dashboard implementation candidate has passed its prior EC2 validation,
-but strict completion is still pending CI and merge evidence. Before starting
-the next dashboard work (Gate 17 decision interface), verify that the UI
-renders the completed Gate 14 assessment fields, including clearly labeled
-agent provenance, fallback/error state, recommendation, and non-bypassable
-human-review requirement. Do not expose internal runtime errors or sensitive
-connection details in the operator interface.
-
-## Recommended next actions
-
-1. Merge and deploy the validated candidate API so its OAuth service-token and
-   event-bound tools are publicly reachable through the hardened HTTPS route.
-2. Configure the purpose-bound OAuth team connection without printing or
-   committing its client secret.
-3. Re-import/redeploy only the four SentinelIQ agents and ten approved tools, capture new
-   UUIDs, and update the ignored EC2 runtime configuration accordingly.
-4. Execute a fresh synthetic event (do not overwrite the prior evidence),
-   verify specialist provenance and persisted observability, then execute the
-   Coordinator run.
-5. Implement Path A removal only after Path B works end-to-end; retain and test
-   deterministic safety fallback behavior.
-6. Update the Gate 14 evidence, ADR, source-of-truth, and gate-plan documents
-   with sanitized facts; run validation exclusively on EC2.
-
-## Source-control and reconciliation requirements
-
-- Preserve existing user changes and never commit ignored runtime environment
-  files, credentials, tokens, tenant identifiers, or generated test artifacts.
-- Commit the completed implementation and evidence documentation on the active
-  branch, push it to GitHub, and wait for the GitHub Actions result.
-- Reconcile local, EC2, and GitHub after the final push: fetch remotes and
-  confirm each relevant branch is neither ahead nor behind its GitHub tracking
-  branch. Resolve any divergence deliberately; do not force-reset a worktree.
-- Strict gate status changes require the pushed/CI-validated commit and the
-  documented evidence above, not an unpushed EC2 result.
-
-## Sensitive-data boundary
-
-This handoff intentionally omits service URLs beyond their generic path form,
-environment values, API keys, tokens, tenant instance identifiers, personal
-emails, IAM identifiers, and application user identifiers. Keep those values
-in the approved ignored runtime configuration only.
+Preserve existing user changes, ignored EC2 environment files, tokens, OAuth
+client secrets, and generated artifacts. Push candidate code and documentation,
+wait for CI, and reconcile the local, EC2, and GitHub tracking branches only
+after the final revision is known. Do not force-reset a dirty worktree.

@@ -225,10 +225,7 @@ class TriageService:
 
         # ---- PATH 0: Deterministic (always available) ------------------------
         duration_ms = (time.monotonic() - t0) * 1000
-        neither_configured = (
-            not force_deterministic
-            and not settings.orchestrate_active
-        )
+        neither_configured = not force_deterministic and not settings.orchestrate_active
         path0_status = "skipped" if neither_configured else "failed_fallback"
 
         result = self._deterministic_triage(event_id, safe_event_metadata)

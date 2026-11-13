@@ -281,10 +281,7 @@ class ExplanationService:
         attempt_id = str(uuid.uuid4())
         attempt_started_at = datetime.now(UTC).isoformat()
         duration_ms = (time.monotonic() - overall_t0) * 1000
-        neither = (
-            not force_deterministic
-            and not settings.orchestrate_active
-        )
+        neither = not force_deterministic and not settings.orchestrate_active
         path0_status = "skipped" if neither else "failed_fallback"
 
         result = grounded_base.model_copy(deep=True)

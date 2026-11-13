@@ -218,10 +218,7 @@ class ContextService:
 
         # ---- PATH 0: Deterministic fallback ----------------------------------
         duration_ms = (time.monotonic() - t0) * 1000
-        neither = (
-            not force_deterministic
-            and not settings.orchestrate_active
-        )
+        neither = not force_deterministic and not settings.orchestrate_active
         path0_status = "skipped" if neither else "failed_fallback"
 
         result = self._deterministic_context(event_id, required_context, evidence)

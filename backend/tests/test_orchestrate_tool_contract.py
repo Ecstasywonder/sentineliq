@@ -138,6 +138,7 @@ def _agent_contract(agent_directory: str) -> dict[str, object]:
 def test_context_agent_has_least_privilege_read_only_tool_contract() -> None:
     context = _agent_contract("context")
 
+    assert context["llm"] == "groq/openai/gpt-oss-120b"
     assert context["style"] == "react_intrinsic"
     assert context["collaborators"] == []
     assert context["tools"] == [
@@ -167,6 +168,7 @@ def test_context_agent_react_output_contract_is_prompted_and_backend_validated()
 def test_coordinator_agent_contract_uses_intrinsic_collaboration_and_prompted_schema() -> None:
     coordinator = _agent_contract("coordinator")
 
+    assert coordinator["llm"] == "groq/openai/gpt-oss-120b"
     assert coordinator["style"] == "react_intrinsic"
     assert coordinator["collaborators"] == [
         "sentinel_triage_agent",

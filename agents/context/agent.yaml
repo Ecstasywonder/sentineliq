@@ -21,7 +21,10 @@ description: >
   conflict flags, and missing-source lists are determined by the backend
   deterministic engine — this agent does not override them.
 
-llm: watsonx/ibm/granite-4-h-small
+# Orchestrate's preferred default model supports ReAct Core tool calling on
+# this tenant.  Granite 4 H Small can answer tool-free prompts but fails before
+# dispatch when an OpenAPI tool is attached.
+llm: groq/openai/gpt-oss-120b
 style: react_intrinsic
 collaborators: []
 tools:

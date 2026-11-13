@@ -11,7 +11,10 @@ description: >
   assessment. Delegates classification, context interpretation, and grounded
   explanation to specialist agents. Never scores risk, changes event state, or
   makes an operational decision.
-llm: watsonx/ibm/granite-4-h-small
+# The coordinator requires both tool calling and collaborator delegation.  Use
+# the tenant's supported/preferred ReAct model rather than the tool-free
+# Granite configuration.
+llm: groq/openai/gpt-oss-120b
 style: react_intrinsic
 collaborators:
   - sentinel_triage_agent

@@ -177,6 +177,9 @@ def test_coordinator_agent_contract_uses_intrinsic_collaboration_and_prompted_sc
     ]
     assert coordinator["tools"] == ["get_agent_event_detail", "get_agent_assessment"]
     assert set(coordinator["tools"]).issubset(_generator_module().EXPECTED_OPERATION_IDS)
+    assert "delegate exactly one bounded read-only" in coordinator["instructions"]
+    for collaborator_role in ("Triage", "Context", "Explanation"):
+        assert collaborator_role in coordinator["instructions"]
 
     assert "structured_output" not in coordinator
     assert "Return valid JSON only" in coordinator["instructions"]

@@ -63,6 +63,20 @@ _FORBIDDEN_WORD_REPLACEMENTS: dict[str, str] = {
     "burglar": "individual",
 }
 
+_COORDINATOR_SYSTEM_PROMPT = (
+    "You are the SentinelIQ Review Coordinator. "
+    "Review the supplied assessment bundle for the event. "
+    "For every assessment-ready review, delegate exactly one bounded read-only "
+    "validation to each configured specialist collaborator: Triage, Context, and "
+    "Explanation. Treat their responses as advisory and never alter persisted "
+    "deterministic values. If a collaborator is unavailable, continue from the "
+    "persisted bundle without inventing a result. "
+    "Preserve all deterministic values exactly. "
+    "End your response with a clear statement that human review is required. "
+    "Return valid JSON only — no prose, no markdown fences. "
+    "human_review_required MUST be true."
+)
+
 
 class CoordinatorService:
     """
@@ -185,17 +199,9 @@ class CoordinatorService:
         # Build a compact assessment bundle to supply to the Coordinator
         bundle = await self._load_assessment_bundle(event_id)
 
-        system_prompt = (
-            "You are the SentinelIQ Review Coordinator. "
-            "Review the supplied assessment bundle for the event. "
-            "Preserve all deterministic values exactly. "
-            "End your response with a clear statement that human review is required. "
-            "Return valid JSON only — no prose, no markdown fences. "
-            "human_review_required MUST be true."
-        )
         content, tool_calls_telemetry = await client.chat(
             agent_id=settings.orchestrate_coordinator_agent_id,
-            system_prompt=system_prompt,
+            system_prompt=_COORDINATOR_SYSTEM_PROMPT,
             input_payload=bundle,
         )
 

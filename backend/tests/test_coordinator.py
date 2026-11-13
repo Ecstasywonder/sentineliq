@@ -42,7 +42,7 @@ from app.models.agent_run import AgentRun
 from app.models.assessment import RiskAssessment
 from app.models.event import SecurityEvent
 from app.models.risk_policy import RiskPolicy, RiskPolicyFactor
-from app.services.coordinator_service import CoordinatorService
+from app.services.coordinator_service import CoordinatorService, _COORDINATOR_SYSTEM_PROMPT
 
 pytestmark = pytest.mark.asyncio
 
@@ -346,6 +346,11 @@ class TestParseAndValidate:
 
 
 class TestCoordinatorServiceRun:
+    def test_runtime_prompt_requires_each_specialist_collaborator(self) -> None:
+        assert "delegate exactly one bounded read-only" in _COORDINATOR_SYSTEM_PROMPT
+        for collaborator_role in ("Triage", "Context", "Explanation"):
+            assert collaborator_role in _COORDINATOR_SYSTEM_PROMPT
+
     async def test_run_uses_fallback_in_test_env(self, db_session: AsyncSession) -> None:
         """APP_ENV=test → orchestrate_active=False → deterministic fallback."""
         evt = await _make_event(db_session)

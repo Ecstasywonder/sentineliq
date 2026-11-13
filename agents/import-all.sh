@@ -13,10 +13,31 @@ command -v orchestrate >/dev/null || {
   exit 1
 }
 
+# Generate the OpenAPI bundle with the repository's backend environment when it
+# exists.  Minimal EC2 images commonly expose only ``python3`` and the system
+# interpreter does not contain the backend dependencies, so hard-coding
+# ``python`` makes an otherwise valid deployment fail before the ADK is used.
+if [[ -n "${SENTINELIQ_PYTHON_BIN:-}" ]]; then
+  python_bin="${SENTINELIQ_PYTHON_BIN}"
+elif [[ -x "${repo_root}/backend/.venv/bin/python" ]]; then
+  python_bin="${repo_root}/backend/.venv/bin/python"
+elif command -v python3 >/dev/null; then
+  python_bin="$(command -v python3)"
+elif command -v python >/dev/null; then
+  python_bin="$(command -v python)"
+else
+  echo "Python interpreter not found; install Python 3 or set SENTINELIQ_PYTHON_BIN" >&2
+  exit 1
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-python "${script_dir}/generate_tool_openapi.py" \
+# Schema generation is a build-time operation and does not connect to the
+# database.  Do not apply production-runtime credential validation to this
+# host-side process; Compose supplies the resolved production settings to the
+# running backend separately.
+APP_ENV=development "${python_bin}" "${script_dir}/generate_tool_openapi.py" \
   --api-base-url "${SENTINELIQ_API_BASE_URL}" \
   --output "${tmp_dir}/sentineliq-readonly.openapi.json"
 

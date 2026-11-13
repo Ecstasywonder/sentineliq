@@ -122,6 +122,7 @@ def test_connection_contract_configures_draft_and_live_runtime_environments() ->
     for environment in connection["environments"].values():
         assert environment == {
             "security_scheme": "oauth2",
+            "auth_type": "oauth2_client_creds",
             "type": "team",
             "server_url": "__SENTINELIQ_API_BASE_URL__",
         }
@@ -137,6 +138,7 @@ def _agent_contract(agent_directory: str) -> dict[str, object]:
 def test_context_agent_has_least_privilege_read_only_tool_contract() -> None:
     context = _agent_contract("context")
 
+    assert context["llm"] == "groq/openai/gpt-oss-120b"
     assert context["style"] == "react_intrinsic"
     assert context["collaborators"] == []
     assert context["tools"] == [
@@ -154,23 +156,19 @@ def test_context_agent_has_least_privilege_read_only_tool_contract() -> None:
     assert "get_agent_assessment" not in context["tools"]
 
 
-def test_context_agent_structured_output_is_narrow_and_strict() -> None:
+def test_context_agent_react_output_contract_is_prompted_and_backend_validated() -> None:
     context = _agent_contract("context")
 
-    assert context["structured_output"] == {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["event_id", "context_summary"],
-        "properties": {
-            "event_id": {"type": "string", "minLength": 1, "maxLength": 128},
-            "context_summary": {"type": "string", "maxLength": 1024},
-        },
-    }
+    assert "structured_output" not in context
+    assert "Return valid JSON only" in context["instructions"]
+    assert '"event_id"' in context["instructions"]
+    assert '"context_summary"' in context["instructions"]
 
 
-def test_coordinator_agent_contract_uses_intrinsic_collaboration_and_schema() -> None:
+def test_coordinator_agent_contract_uses_intrinsic_collaboration_and_prompted_schema() -> None:
     coordinator = _agent_contract("coordinator")
 
+    assert coordinator["llm"] == "groq/openai/gpt-oss-120b"
     assert coordinator["style"] == "react_intrinsic"
     assert coordinator["collaborators"] == [
         "sentinel_triage_agent",
@@ -179,22 +177,18 @@ def test_coordinator_agent_contract_uses_intrinsic_collaboration_and_schema() ->
     ]
     assert coordinator["tools"] == ["get_agent_event_detail", "get_agent_assessment"]
     assert set(coordinator["tools"]).issubset(_generator_module().EXPECTED_OPERATION_IDS)
+    assert "delegate exactly one bounded read-only" in coordinator["instructions"]
+    assert "Never repeat a category" in coordinator["instructions"]
+    for collaborator_role in ("Triage", "Context", "Explanation"):
+        assert collaborator_role in coordinator["instructions"]
 
-    assert coordinator["structured_output"] == {
-        "type": "object",
-        "additionalProperties": False,
-        "required": [
-            "event_id",
-            "assessment_ready",
-            "summary",
-            "missing_evidence",
-            "human_review_required",
-        ],
-        "properties": {
-            "event_id": {"type": "string"},
-            "assessment_ready": {"type": "boolean"},
-            "summary": {"type": "string", "maxLength": 1024},
-            "missing_evidence": {"type": "array", "items": {"type": "string"}},
-            "human_review_required": {"type": "boolean", "const": True},
-        },
-    }
+    assert "structured_output" not in coordinator
+    assert "Return valid JSON only" in coordinator["instructions"]
+    for field in (
+        "event_id",
+        "assessment_ready",
+        "summary",
+        "missing_evidence",
+        "human_review_required",
+    ):
+        assert f'"{field}"' in coordinator["instructions"]

@@ -1,7 +1,7 @@
 """
-TriageService — Gate 14 (dual-path, ADR-008).
+TriageService — Gate 14 (Orchestrate-first, ADR-008).
 
-Invocation priority (three paths, highest to lowest):
+Invocation priority (two paths, highest to lowest):
 
   PATH B — watsonx Orchestrate SaaS (primary when provisioned)
     Condition: settings.orchestrate_active == True
@@ -10,22 +10,16 @@ Invocation priority (three paths, highest to lowest):
     Benefits:  agent versioning, governance, collaborator chains,
                Orchestrate UI traces, human-approval steps, evaluation
 
-  PATH A — watsonx.ai Chat API (verified fallback)
-    Condition: settings.watsonx_active == True
-               (WATSONX_BASE_URL + API key + WATSONX_SPACE_ID all set)
-    Mechanism: IAM token exchange → POST /ml/v1/text/chat
-    Status:    VERIFIED WORKING (ibm/granite-4-h-small, 2026-11-05)
-
   PATH 0 — Deterministic fallback (always available)
-    Condition: both above unavailable OR both above fail
+    Condition: Orchestrate is unavailable or fails
     Mechanism: rule-based Python — no LLM, no network
     Guarantee: event is NEVER lost; conservative classification
 
 Design constraints (master prompt §10, §11, §15, §28, §34):
   - Triage NEVER produces risk scores or enforcement decisions.
   - Agent output is UNTRUSTED — all fields filtered against allowlists.
-  - AgentRun row persisted for every call (all three paths).
-  - source field distinguishes orchestrate / watsonx_ai / deterministic_fallback.
+  - AgentRun row persisted for every call.
+  - source field distinguishes orchestrate / deterministic_fallback.
 """
 
 from __future__ import annotations
@@ -36,26 +30,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
 import structlog
 from pydantic import ValidationError
 
 from app.config import get_settings
 from app.models.agent_run import AgentRun, ToolCall
-from app.services.orchestrate_client import OrchestrateClient, validate_watsonx_base_url
+from app.services.orchestrate_client import OrchestrateClient
 
 logger = structlog.get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Endpoint / model constants
-# ---------------------------------------------------------------------------
-
-# Path A — watsonx.ai Chat API (verified 2026-11-05)
-_WATSONX_CHAT_PATH = "/ml/v1/text/chat"
-_WATSONX_CHAT_VERSION = "2024-09-16"
-
-# IAM token endpoint (shared by both paths)
-_IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
 
 # ---------------------------------------------------------------------------
 # Allowlists — must stay in sync with agents/triage/agent.yaml
@@ -119,7 +101,7 @@ _ALL_EVENT_TYPES = frozenset(
     }
 )
 
-# System prompt shared by both Path B and Path A — mirrors agents/triage/agent.yaml
+# Orchestrate system prompt — mirrors agents/triage/agent.yaml
 _TRIAGE_SYSTEM_PROMPT = (
     "You are the SentinelIQ Triage Agent.\n"
     "Your only job is to classify the security event and identify what evidence must be gathered.\n"
@@ -160,10 +142,9 @@ class TriageService:
 
     Path routing is automatic based on settings:
       orchestrate_active=True  → Path B (Orchestrate SaaS)
-      watsonx_active=True      → Path A (watsonx.ai Chat API) [current verified state]
-      neither                  → Path 0 (deterministic fallback)
+      otherwise                → Path 0 (deterministic fallback)
 
-    On any exception in Path B or A, the service falls through to Path 0.
+    On any exception in Path B, the service falls through to Path 0.
     The event is NEVER lost.
     """
 
@@ -239,59 +220,12 @@ class TriageService:
                 )
                 attempt_errors.append(f"orchestrate: {str(exc)[:256]}")
                 logger.warning(
-                    "triage.path_b.failed", event_id=event_id, error=str(exc), fallthrough="path_a"
+                    "triage.path_b.failed", event_id=event_id, error=str(exc), fallthrough="path_0"
                 )
-
-        # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
-        if settings.watsonx_active and not force_deterministic:
-            attempt_started = time.monotonic()
-            try:
-                raw, tool_calls = await self._invoke_watsonx_ai(
-                    event_id, safe_event_metadata, effective_timeout
-                )
-                duration_ms = (time.monotonic() - t0) * 1000
-                result = self._parse_and_validate(event_id, raw, source="watsonx_ai")
-                result.agent_run_id = run_id
-                await self._persist_agent_run(
-                    run_id=run_id,
-                    event_id=event_id,
-                    started_at=started_at,
-                    status="success",
-                    duration_ms=duration_ms,
-                    agent_name="sentinel_triage_agent",
-                    agent_version=settings.watsonx_model_id,
-                    path="watsonx_ai",
-                    tool_calls=[*attempt_records, *tool_calls],
-                )
-                logger.info(
-                    "triage.path_a.success",
-                    event_id=event_id,
-                    category=result.category,
-                    duration_ms=round(duration_ms, 1),
-                )
-                return result
-            except Exception as exc:
-                attempt_records.append(
-                    {
-                        "tool_name": "watsonx_chat",
-                        "status": "failed",
-                        "duration_ms": (time.monotonic() - attempt_started) * 1000,
-                        "error_message": str(exc)[:512],
-                    }
-                )
-                attempt_errors.append(f"watsonx_ai: {str(exc)[:256]}")
-                logger.warning(
-                    "triage.path_a.failed", event_id=event_id, error=str(exc), fallthrough="path_0"
-                )
-                # fall through to Path 0
 
         # ---- PATH 0: Deterministic (always available) ------------------------
         duration_ms = (time.monotonic() - t0) * 1000
-        neither_configured = (
-            not force_deterministic
-            and not settings.orchestrate_active
-            and not settings.watsonx_active
-        )
+        neither_configured = not force_deterministic and not settings.orchestrate_active
         path0_status = "skipped" if neither_configured else "failed_fallback"
 
         result = self._deterministic_triage(event_id, safe_event_metadata)
@@ -352,96 +286,6 @@ class TriageService:
             system_prompt=_TRIAGE_SYSTEM_PROMPT,
             input_payload=event_metadata,
         )
-
-    # ------------------------------------------------------------------
-    # PATH A — watsonx.ai Chat API (verified working)
-    # ------------------------------------------------------------------
-
-    async def _invoke_watsonx_ai(
-        self,
-        event_id: str,
-        event_metadata: dict[str, Any],
-        timeout: float,
-    ) -> tuple[str, list[dict[str, Any]]]:
-        """
-        Call the watsonx.ai Chat API directly.
-
-        Endpoint: POST <WATSONX_BASE_URL>/ml/v1/text/chat?version=2024-09-16
-        Auth:     Bearer <IAM_token>  (exchanged from API key via IAM)
-        Space:    WATSONX_SPACE_ID   (must have WML instance associated)
-        Model:    WATSONX_MODEL_ID   (default: ibm/granite-4-h-small)
-
-        Verified working 2026-11-05:
-          HTTP 200, category=after_hours_presence, valid JSON output.
-
-        Raises on HTTP errors, IAM failure, or empty response.
-        """
-        settings = self._settings
-        base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
-
-        iam_token = await self._get_iam_token(settings.effective_watsonx_api_key, timeout)
-        headers = {
-            "Authorization": f"Bearer {iam_token}",
-            "Content-Type": "application/json",
-        }
-        payload: dict[str, Any] = {
-            "model_id": settings.watsonx_model_id,
-            "space_id": settings.effective_watsonx_space_id,
-            "messages": [
-                {"role": "system", "content": _TRIAGE_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(event_metadata, default=str)},
-            ],
-            "parameters": {
-                "max_new_tokens": 300,
-                "decoding_method": "greedy",
-            },
-        }
-
-        url = f"{base_url}{_WATSONX_CHAT_PATH}?version={_WATSONX_CHAT_VERSION}"
-        tool_call_records: list[dict[str, Any]] = []
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            t0 = time.monotonic()
-            response = await client.post(url, headers=headers, json=payload)
-            call_ms = (time.monotonic() - t0) * 1000
-            response.raise_for_status()
-
-        data = response.json()
-        tool_call_records.append(
-            {
-                "tool_name": "watsonx_chat",
-                "status": "success",
-                "duration_ms": call_ms,
-                "sequence": 0,
-            }
-        )
-
-        choices = data.get("choices") or []
-        if not choices:
-            raise ValueError("watsonx.ai response contained no choices.")
-        content = (choices[0].get("message") or {}).get("content", "")
-        if not content:
-            raise ValueError("watsonx.ai response content was empty.")
-
-        return content, tool_call_records
-
-    async def _get_iam_token(self, api_key: str, timeout: float) -> str:
-        """Exchange an IBM Cloud API key for a short-lived IAM bearer token."""
-        async with httpx.AsyncClient(timeout=min(timeout, 15.0)) as client:
-            resp = await client.post(
-                _IAM_TOKEN_URL,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={
-                    "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
-                    "apikey": api_key,
-                },
-            )
-            resp.raise_for_status()
-        token_data = resp.json()
-        access_token = token_data.get("access_token", "")
-        if not access_token:
-            raise ValueError("IAM token exchange returned no access_token.")
-        return access_token
 
     # ------------------------------------------------------------------
     # Response validation (shared by all LLM paths)

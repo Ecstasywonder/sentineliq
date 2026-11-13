@@ -48,7 +48,7 @@ This register records all assumptions made during the design and implementation 
 | A-10 | A watsonx Orchestrate tenant will be available from Gate 7 | 7 | Agent work blocked; stubs maintained | Project Owner | Open |
 | A-11 | watsonx Orchestrate supports Python tool functions via ADK | 7 | Tool implementation approach may differ | Architect | Open |
 | A-12 | Orchestrate ADK is installable via pip on Ubuntu | 7 | Alternative install path needed | Architect | Open |
-| A-13 | Model inference will be accessible through Orchestrate (not direct watsonx.ai API) | 11 | Model routing architecture changes | Architect | Open |
+| A-13 | Model inference is available through watsonx Orchestrate, not direct watsonx.ai Chat API | 11–14 | A tenant/runtime failure would require deterministic safety fallback, not silent provider substitution | Architect | Confirmed — EC2 live tool/collaborator and specialist-run evidence on 2026-11-13; Path-A removal remains pending merge/deploy |
 
 ## Database Assumptions
 

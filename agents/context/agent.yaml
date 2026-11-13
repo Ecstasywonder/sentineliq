@@ -21,7 +21,10 @@ description: >
   conflict flags, and missing-source lists are determined by the backend
   deterministic engine — this agent does not override them.
 
-llm: watsonx/ibm/granite-4-h-small
+# Orchestrate's preferred default model supports ReAct Core tool calling on
+# this tenant.  Granite 4 H Small can answer tool-free prompts but fails before
+# dispatch when an OpenAPI tool is attached.
+llm: groq/openai/gpt-oss-120b
 style: react_intrinsic
 collaborators: []
 tools:
@@ -87,17 +90,6 @@ instructions: |
     "context_summary": "<two sentences max — neutral factual summary>"
   }
 
-structured_output:
-  type: object
-  additionalProperties: false
-  required:
-    - event_id
-    - context_summary
-  properties:
-    event_id:
-      type: string
-      minLength: 1
-      maxLength: 128
-    context_summary:
-      type: string
-      maxLength: 1024
+# ReAct Core does not support Orchestrate's native structured_output
+# enforcement. The exact response schema is defined in the instructions above
+# and is enforced again by ContextAgentOutput in the backend trust boundary.

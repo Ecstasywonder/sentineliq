@@ -33,8 +33,7 @@ class ContextResult(BaseModel):
 
     ``source`` distinguishes which path produced the result:
       - "orchestrate"            — Path B validated agent response
-      - "watsonx_ai"             — Path A validated agent response
-      - "deterministic_fallback" — all LLM paths unavailable or failed
+      - "deterministic_fallback" — Orchestrate unavailable or failed
     """
 
     event_id: str

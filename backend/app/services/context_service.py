@@ -1,16 +1,13 @@
 """
-ContextService — Gate 15 (dual-path, ADR-008).
+ContextService — Gate 15 (Orchestrate-first, ADR-008).
 
-Invocation priority (three paths, identical to TriageService):
+Invocation priority (two paths, identical to TriageService):
 
   PATH B — watsonx Orchestrate SaaS
     Condition: settings.orchestrate_active == True
 
-  PATH A — watsonx.ai Chat API (verified fallback)
-    Condition: settings.watsonx_active == True
-
   PATH 0 — Deterministic fallback (always available)
-    Condition: both above unavailable OR both fail
+    Condition: Orchestrate is unavailable or fails
 
 The Context Agent receives:
   - event metadata (type, timestamp, location, zone)
@@ -28,7 +25,7 @@ Design constraints:
   - Agent output is UNTRUSTED — all fields filtered before use.
   - Missing evidence is NEVER treated as negative evidence (ADR-004).
   - Conflict detection is surfaced, not resolved — human review decides.
-  - AgentRun row persisted for every call (all three paths).
+  - AgentRun row persisted for every call.
 """
 
 from __future__ import annotations
@@ -39,7 +36,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
 import structlog
 from pydantic import ValidationError
 
@@ -54,17 +50,9 @@ from app.schemas.context import (
 
 # _ALLOWED_STATUSES is no longer used in _parse_and_validate but is kept
 # for external callers / future use.
-from app.services.orchestrate_client import OrchestrateClient, validate_watsonx_base_url
+from app.services.orchestrate_client import OrchestrateClient
 
 logger = structlog.get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Endpoint constants (shared with TriageService)
-# ---------------------------------------------------------------------------
-
-_WATSONX_CHAT_PATH = "/ml/v1/text/chat"
-_WATSONX_CHAT_VERSION = "2024-09-16"
-_IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
 
 # ---------------------------------------------------------------------------
 # Allowed source status values
@@ -130,8 +118,7 @@ class ContextService:
 
     Path routing mirrors TriageService (ADR-008):
       orchestrate_active → Path B
-      watsonx_active     → Path A  (current verified path)
-      neither            → Path 0  (deterministic)
+      otherwise          → Path 0  (deterministic)
     """
 
     def __init__(self, session: Any) -> None:
@@ -226,58 +213,12 @@ class ContextService:
                 )
                 attempt_errors.append(f"orchestrate: {str(exc)[:256]}")
                 logger.warning(
-                    "context.path_b.failed", event_id=event_id, error=str(exc), fallthrough="path_a"
-                )
-
-        # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
-        if settings.watsonx_active and not force_deterministic:
-            attempt_started = time.monotonic()
-            try:
-                raw, tool_calls = await self._invoke_watsonx_ai(input_payload, effective_timeout)
-                duration_ms = (time.monotonic() - t0) * 1000
-                result = self._parse_and_validate(
-                    event_id, raw, required_context, evidence, source="watsonx_ai"
-                )
-                result.agent_run_id = run_id
-                await self._persist_agent_run(
-                    run_id=run_id,
-                    event_id=event_id,
-                    started_at=started_at,
-                    status="success",
-                    duration_ms=duration_ms,
-                    agent_version=settings.watsonx_model_id,
-                    path="watsonx_ai",
-                    tool_calls=[*attempt_records, *tool_calls],
-                )
-                logger.info(
-                    "context.path_a.success",
-                    event_id=event_id,
-                    has_conflicts=result.has_conflicts,
-                    missing=result.missing_sources,
-                    duration_ms=round(duration_ms, 1),
-                )
-                return result
-            except Exception as exc:
-                attempt_records.append(
-                    {
-                        "tool_name": "watsonx_chat",
-                        "status": "failed",
-                        "duration_ms": (time.monotonic() - attempt_started) * 1000,
-                        "error_message": str(exc)[:512],
-                    }
-                )
-                attempt_errors.append(f"watsonx_ai: {str(exc)[:256]}")
-                logger.warning(
-                    "context.path_a.failed", event_id=event_id, error=str(exc), fallthrough="path_0"
+                    "context.path_b.failed", event_id=event_id, error=str(exc), fallthrough="path_0"
                 )
 
         # ---- PATH 0: Deterministic fallback ----------------------------------
         duration_ms = (time.monotonic() - t0) * 1000
-        neither = (
-            not force_deterministic
-            and not settings.orchestrate_active
-            and not settings.watsonx_active
-        )
+        neither = not force_deterministic and not settings.orchestrate_active
         path0_status = "skipped" if neither else "failed_fallback"
 
         result = self._deterministic_context(event_id, required_context, evidence)
@@ -310,7 +251,7 @@ class ContextService:
         input_payload: dict[str, Any],
         timeout: float,
     ) -> tuple[str, list[dict[str, Any]]]:
-        # Orchestrate receives the same compact, allowlisted package as Path A.
+        # Orchestrate receives the compact, allowlisted package.
         # Never send raw provider metadata or incident/policy narratives across
         # the model boundary.
         settings = self._settings
@@ -325,74 +266,6 @@ class ContextService:
             system_prompt=_CONTEXT_SYSTEM_PROMPT,
             input_payload=self._compact_evidence_for_llm(input_payload),
         )
-
-    # ------------------------------------------------------------------
-    # PATH A — watsonx.ai Chat API
-    # ------------------------------------------------------------------
-
-    async def _invoke_watsonx_ai(
-        self,
-        input_payload: dict[str, Any],
-        timeout: float,
-    ) -> tuple[str, list[dict[str, Any]]]:
-        settings = self._settings
-        base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
-
-        iam_token = await self._get_iam_token(settings.effective_watsonx_api_key, timeout)
-        headers = {
-            "Authorization": f"Bearer {iam_token}",
-            "Content-Type": "application/json",
-        }
-        # Summarise evidence compactly for the LLM (avoid hitting token limits)
-        compact = self._compact_evidence_for_llm(input_payload)
-        payload: dict[str, Any] = {
-            "model_id": settings.watsonx_model_id,
-            "space_id": settings.effective_watsonx_space_id,
-            "messages": [
-                {"role": "system", "content": _CONTEXT_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(compact, default=str)},
-            ],
-            "parameters": {"max_new_tokens": 600, "decoding_method": "greedy"},
-        }
-
-        url = f"{base_url}{_WATSONX_CHAT_PATH}?version={_WATSONX_CHAT_VERSION}"
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            t0 = time.monotonic()
-            response = await client.post(url, headers=headers, json=payload)
-            call_ms = (time.monotonic() - t0) * 1000
-            response.raise_for_status()
-
-        data = response.json()
-        tool_calls = [
-            {
-                "tool_name": "watsonx_chat",
-                "status": "success",
-                "duration_ms": call_ms,
-                "sequence": 0,
-            }
-        ]
-
-        choices = data.get("choices") or []
-        if not choices:
-            raise ValueError("watsonx.ai context response contained no choices.")
-        content = (choices[0].get("message") or {}).get("content", "")
-        if not content:
-            raise ValueError("watsonx.ai context response content was empty.")
-
-        return content, tool_calls
-
-    async def _get_iam_token(self, api_key: str, timeout: float) -> str:
-        async with httpx.AsyncClient(timeout=min(timeout, 15.0)) as client:
-            resp = await client.post(
-                _IAM_TOKEN_URL,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={"grant_type": "urn:ibm:params:oauth:grant-type:apikey", "apikey": api_key},
-            )
-            resp.raise_for_status()
-        access_token = resp.json().get("access_token", "")
-        if not access_token:
-            raise ValueError("IAM token exchange returned no access_token.")
-        return access_token
 
     # ------------------------------------------------------------------
     # Evidence serialisation helpers

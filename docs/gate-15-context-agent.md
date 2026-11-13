@@ -9,7 +9,8 @@
 
 > **Gate numbering:** This report retains the original roadmap label. It implements
 > Gate 12 (Context Agent) in the canonical [Master Build Prompt](master-build-prompt.md).
-> Live watsonx Orchestrate tenant validation remains outstanding.
+> Live watsonx Orchestrate validation completed on EC2 on 2026-11-13. Final
+> merge, CI, and deployed-revision regression evidence remains required.
 
 ---
 
@@ -20,10 +21,12 @@ After evidence is gathered by `EvidenceAggregator` (Gate 7/8), the Context Agent
 interprets each source's findings, identifies conflicts between sources, and produces
 a structured `ContextResult` that flows into `AssessmentResponse`.
 
-The agent follows the same three-path architecture as the Triage Agent (ADR-008):
-- **Path B** — watsonx Orchestrate SaaS (activates when `ORCHESTRATE_URL` is set)
-- **Path A** — watsonx.ai Chat API (activates when `WATSONX_*` vars are set, verified live)
+The target architecture is the same as the Triage Agent (ADR-008):
+- **Path B** — watsonx Orchestrate SaaS, the sole remote LLM runtime
 - **Path 0** — Deterministic fallback (always available, no LLM required)
+
+The direct watsonx.ai chat branch is being removed in the active candidate;
+watsonx embeddings remain an independent, non-generation integration.
 
 ---
 
@@ -35,7 +38,7 @@ The agent follows the same three-path architecture as the Triage Agent (ADR-008)
 | Output schema (Pydantic) | `agents/context/output_schema.py` | ✅ |
 | OpenAPI tool schemas (7) | `agents/context/tools/` | ✅ |
 | Context schemas | `backend/app/schemas/context.py` | ✅ |
-| ContextService (3-path) | `backend/app/services/context_service.py` | ✅ |
+| ContextService (Orchestrate + deterministic fallback) | `backend/app/services/context_service.py` | ✅ target; removal candidate pending merge/deploy |
 | AssessmentService wired | `backend/app/services/assessment_service.py` | ✅ |
 | AssessmentResponse updated | `backend/app/schemas/assessment.py` | ✅ |
 | Tests (25) | `backend/tests/test_context_agent.py` | ✅ |
@@ -83,7 +86,7 @@ ConfidenceEngine.assess()    ── independent confidence (ADR-004)
 | `context_summary` | Two-sentence neutral factual summary (≤ 1024 chars) |
 | `has_conflicts` | Boolean: any conflicts detected |
 | `has_missing_sources` | Boolean: any required sources unavailable |
-| `source` | Path that produced the result: `orchestrate` / `watsonx_ai` / `deterministic_fallback` |
+| `source` | Runtime provenance: `orchestrate` or `deterministic_fallback` after Path-A removal deploys |
 | `agent_run_id` | UUID of the AgentRun row persisted for this call |
 
 ---
@@ -96,7 +99,7 @@ ConfidenceEngine.assess()    ── independent confidence (ADR-004)
 | Missing evidence ≠ negative evidence | ADR-004 | Unavailable sources are flagged as `unavailable`, never inferred as absent |
 | Conflict surfaced, not resolved | ADR-006 | `has_conflicts` is passed to `ConfidenceEngine`; human review decides |
 | Event never lost on AI failure | ADR-007 | Path 0 is always available; `run()` never raises |
-| Dual-path routing | ADR-008 | Identical three-path structure to TriageService |
+| Runtime routing | ADR-008 | Orchestrate Path B with deterministic safety fallback |
 | Neutral language | Master prompt §28 | System prompt explicitly forbids: criminal, intruder, suspicious person |
 
 ---
@@ -150,9 +153,8 @@ Seven tool schemas are defined in `agents/context/tools/`:
 | `get_incident_history.yaml` | Prior incident records at a location |
 | `get_event_detail.yaml` | Full metadata for a SentinelIQ event |
 
-These are used by the Orchestrate agent definition (`agent.yaml`) for PATH B.
-In PATH A, the `ContextService` passes a compact evidence summary directly to the
-watsonx.ai Chat API — no tool calls required.
+These are used by the Orchestrate agent definition (`agent.yaml`) for Path B.
+The active removal candidate retires direct watsonx.ai chat invocation.
 
 ---
 
@@ -178,7 +180,7 @@ Coverage: 92%
 | `TestConflictDetection` | 3 tests — badge+policy conflict, denied+no-schedule, no-conflict |
 | `TestParseAndValidate` | 8 tests — injection filtering, status normalisation, markdown strip |
 | `TestCompactEvidence` | 2 tests — errors propagation, record detail limiting |
-| `TestLLMPaths` | 4 tests — Path A success, A→0 fallback, no-creds→0, B→A fallback |
+| `TestLLMPaths` | Historical coverage; replace Path-A cases with Path-B failure → deterministic fallback in the removal candidate |
 | `test_assess_response_includes_context` | Integration: endpoint returns context field |
 
 ---
@@ -219,5 +221,14 @@ Coverage: 92%
 
 ## No regressions
 
-All 372 pre-existing tests from Gates 0–14 continue to pass.  
-Gate 15 adds 25 new tests for a total of **397 tests**.
+Historical counts above are not current release evidence. Focused EC2 validation
+must be re-run after the Path-A-removal candidate merges and is deployed.
+
+## Live Orchestrate evidence (2026-11-13)
+
+Context successfully called the OAuth-protected event-detail tool and returned
+valid structured JSON from watsonx Orchestrate. The current runtime UUID is
+`29220055-2483-4d4f-9efc-2f0ff93d457a`; re-import can change it. A fresh
+assessment recorded Context source `orchestrate`. Native ReAct
+`structured_output` is unsupported, so the exact response schema is kept in
+agent instructions and enforced by backend Pydantic validation.

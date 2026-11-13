@@ -194,7 +194,7 @@ async def test_watsonx_embedding_requests_are_batched() -> None:
     service = KnowledgeRetrievalService(MagicMock())
     settings = MagicMock(
         enable_semantic_search=True,
-        watsonx_active=True,
+        watsonx_embeddings_active=True,
         effective_watsonx_api_key="test-key",
         effective_watsonx_base_url="https://us-south.ml.cloud.ibm.com",
         watsonx_api_version="2024-05-31",
@@ -256,7 +256,7 @@ async def test_watsonx_embedding_rejects_unsafe_host_before_iam_or_http() -> Non
     service = KnowledgeRetrievalService(MagicMock())
     settings = MagicMock(
         enable_semantic_search=True,
-        watsonx_active=True,
+        watsonx_embeddings_active=True,
         effective_watsonx_api_key="test-key",
         effective_watsonx_base_url="https://us-south.ml.cloud.ibm.com.evil.example",
         watsonx_api_version="2024-05-31",

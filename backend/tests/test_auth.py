@@ -270,6 +270,51 @@ async def test_login_happy_path(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_login_persists_refresh_token_family_before_its_token(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Login flushes the FK parent before staging the refresh-token child."""
+    await app.state.rate_limiter.reset()
+    email = f"auth_refresh_order_{_id()[:8]}@test.com"
+    await _seed_user(db_session, email, "pass")
+    await db_session.commit()
+
+    original_flush = db_session.flush
+    flush_calls: list[tuple[bool, bool]] = []
+
+    async def tracked_flush(*args, **kwargs) -> None:
+        pending = list(db_session.new)
+        flush_calls.append(
+            (
+                any(isinstance(item, RefreshTokenFamily) for item in pending),
+                any(isinstance(item, RefreshToken) for item in pending),
+            )
+        )
+        await original_flush(*args, **kwargs)
+
+    monkeypatch.setattr(db_session, "flush", tracked_flush)
+
+    async with _auth_client(db_session) as ac:
+        response = await ac.post(
+            "/api/v1/auth/token",
+            json={"email": email, "password": "pass"},
+        )
+    await app.state.rate_limiter.reset()
+
+    assert response.status_code == 200, response.text
+    assert flush_calls == [(True, False), (False, True)]
+
+    claims = decode_refresh_token_claims(response.json()["refresh_token"])
+    await db_session.commit()
+    family = await db_session.get(RefreshTokenFamily, claims.family_id)
+    token = await db_session.get(RefreshToken, claims.token_id)
+    assert family is not None
+    assert token is not None
+    assert token.family_id == family.family_id
+
+
+@pytest.mark.asyncio
 async def test_login_wrong_password(db_session: AsyncSession) -> None:
     """Wrong password returns 401."""
     email = f"auth_wrong_{_id()[:8]}@test.com"

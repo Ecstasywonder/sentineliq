@@ -327,7 +327,7 @@ class KnowledgeRetrievalService:
     async def _semantic_vectors(self, texts: list[str]) -> list[list[float]]:
         """Use watsonx embeddings when configured; fail closed to local vectors."""
         settings = get_settings()
-        if settings.enable_semantic_search and settings.watsonx_active:
+        if settings.enable_semantic_search and settings.watsonx_embeddings_active:
             try:
                 base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
                 token = await self._watsonx_iam_token(

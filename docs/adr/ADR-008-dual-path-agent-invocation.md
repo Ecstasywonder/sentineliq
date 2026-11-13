@@ -1,173 +1,101 @@
-# ADR-008 — Dual-Path Agent Invocation Architecture
+# ADR-008 — Watsonx Orchestrate Agent Invocation
 
-**Status:** Accepted  
-**Date:** 2026-11-05  
-**Author:** IBM Bob (Principal Architect)  
-**Historical gate:** 14 (amendment) — **Master Build Prompt Gate 11**
-
----
+**Status:** Superseded decision implemented; final code removal of the retired path is pending merge and deployment
+**Date:** 2026-11-13
+**Historical gate:** 14 (amendment) — **Master Build Prompt Gates 11–14**
 
 ## Context
 
-Gate 14 originally targeted watsonx Orchestrate SaaS as the exclusive
-runtime for agent invocation. During connection verification it was found
-that:
+SentinelIQ must use watsonx Orchestrate as its LLM-agent runtime. An earlier
+temporary design allowed direct watsonx.ai Chat API invocation ("Path A") when
+Orchestrate was unavailable. That was a provisioning workaround, not the
+target architecture.
 
-1. No watsonx Orchestrate SaaS tenant URL is provisioned for this account.
-2. The `ORCHESTRATE_BASE_URL` pointed to `https://us-south.ml.cloud.ibm.com`
-   (watsonx.ai ML runtime), not an Orchestrate tenant.
-3. A direct call to the watsonx.ai Chat API (`/ml/v1/text/chat`) with
-   `ibm/granite-4-h-small` and the Orchestrate Developer Edition space
-   (`5ff3e395-...`) was verified working end-to-end on 2026-11-05, producing
-   correct structured triage output.
+On 2026-11-13, EC2 validation demonstrated the intended Orchestrate path
+against the live tenant:
 
-The decision was therefore needed on how to preserve the full intended
-Orchestrate architecture while not blocking current development on an
-unprovisioned service.
+- a fresh event completed Triage, Context, and Explanation with source
+  `orchestrate`;
+- Context called the event-detail tool through the OAuth-protected SentinelIQ
+  API and returned valid JSON;
+- Coordinator executed its read-only event/assessment tools and delegated to
+  Triage, Context, and Explanation collaborators;
+- the selected tenant model was `groq/openai/gpt-oss-120b`. The previously
+  tested Granite model emitted tool-call arguments as JSON strings rather than
+  objects and did not meet the tool-call contract.
 
----
+The ReAct Core runtime does not support its native `structured_output` setting.
+The checked-in agents therefore carry their exact JSON response schema in their
+instructions, and the backend Pydantic validators remain the enforcement point.
+This is an intentional compatibility adaptation, not a relaxation of the
+output contract.
 
 ## Decision
 
-### Three-path invocation hierarchy
-
-The Triage, Context, and Explanation backend services implement three
-invocation paths in strict priority order:
+The only remote LLM invocation path is **Path B — watsonx Orchestrate**.
 
 ```
-PATH B — watsonx Orchestrate SaaS  (primary — activates when ORCHESTRATE_URL is set)
-     ↓ (on failure or not configured)
-PATH A — watsonx.ai Chat API        (verified fallback — activates when WATSONX_* vars set)
-     ↓ (on failure or not configured)
-PATH 0 — Deterministic fallback     (always available — no LLM, no network)
+watsonx Orchestrate (Path B, sole remote LLM runtime)
+       ↓ on configuration, transport, or validation failure
+Deterministic fallback (Path 0, non-LLM safety behavior)
 ```
 
-**Path B is the intended production path.** It is implemented against IBM's
-documented direct-agent chat-completions contract and has local contract-test
-coverage. Invocation against the project's live tenant remains unverified and
-must not be represented as live-validated until tenant credentials and an
-imported agent are available.
+Direct watsonx.ai Chat API inference is retired. The implementation removing
+its service branches, configuration routing, source labels, and tests is in
+the active candidate and must be merged, CI-validated, and deployed before the
+repository or live service is described as Path-B-only in operation.
 
-**Path A is the currently verified remote path.** It uses
-`ibm/granite-4-h-small` and the same task constraints as the corresponding
-backend service. The strict backend output validator is shared across all
-three paths.
+Watsonx credentials may continue to be used for the independent embeddings
+integration. That use is not a chat-generation fallback and must be configured
+and named independently from agent invocation.
 
-**Path 0 always succeeds.** It is the rule-based Python fallback that has
-been present since Gate 14. It mirrors the agent's classification rules
-exactly, making it predictable and fully testable without any network.
+## Runtime contract
 
-### Configuration routing
+- Agent definitions use ReAct intrinsic agents with explicit read-only tools
+  and declared collaborator boundaries.
+- Context has no peer collaborators. Coordinator may request bounded,
+  read-only input from Triage, Context, and Explanation; it has no workflow or
+  enforcement authority.
+- Backend services treat every agent response as untrusted: they validate a
+  strict Pydantic model, server-own event identifiers and workflow facts, and
+  persist `AgentRun`/tool telemetry.
+- Coordinator operator-facing fields are reconstructed from the persisted
+  assessment bundle after validation, preventing a collaborator from adding
+  invented evidence to the review.
+- On any Path B failure, the deterministic fallback preserves the event and
+  retains the non-bypassable human-review requirement. It never fabricates LLM
+  output.
 
-| Variable | Purpose | Path activated |
-|----------|---------|---------------|
-| `ORCHESTRATE_URL` | Orchestrate tenant URL | Path B (when + API key set) |
-| `ORCHESTRATE_API_KEY` | IBM Cloud API key exchanged for an IAM bearer token | Path B (and Path A only as a backwards-compatible fallback) |
-| `ORCHESTRATE_API_VERSION` | Direct-agent API version (`v2` default; `v1_5` supported) | Path B |
-| `WATSONX_BASE_URL` | watsonx.ai ML endpoint | Path A |
-| `WATSONX_API_KEY` | IBM Cloud API key for IAM | Path A |
-| `WATSONX_SPACE_ID` | Space with WML instance | Path A |
-| `WATSONX_MODEL_ID` | Foundation model | Path A |
-| *(none of the above)* | — | Path 0 only |
+## Evidence recorded
 
-Backwards-compat shims for `ORCHESTRATE_BASE_URL` and `ORCHESTRATE_SPACE_ID`
-are provided in `Settings` so existing `.env` files continue working.
+Current live tenant runtime IDs (re-import may change them):
 
-### Source field in TriageResult
+| Agent | Runtime UUID |
+|---|---|
+| Triage | `76daed62-455c-4999-93b1-8ab7aff82c31` |
+| Context | `29220055-2483-4d4f-9efc-2f0ff93d457a` |
+| Explanation | `093479ec-41e9-43d8-89b3-28d1cbffa75f` |
+| Coordinator | `0e56991e-cd11-4f77-812f-ced7b31aeac7` |
 
-The `source` field records which path produced the result:
-- `"orchestrate"` — Path B succeeded
-- `"watsonx_ai"` — Path A succeeded
-- `"deterministic_fallback"` — Path 0 used (no LLM available or both failed)
-
-### Path B API contract
-
-When Orchestrate is provisioned:
-1. Run `orchestrate agents import --file agents/triage/agent.yaml`
-2. Set `ORCHESTRATE_URL=https://<tenant>.ibm-watson-orchestrate.com`
-3. Set `ORCHESTRATE_API_KEY=<api_key>`
-
-The three backend agent services will automatically route to Path B. A live
-tenant check is still required because agent import state, agent identifiers,
-tenant authorization, and runtime response behavior cannot be proven by local
-contract tests.
-
-For IBM Cloud SaaS, Path B exchanges the API key at IBM Cloud IAM and sends
-the resulting short-lived bearer token. `ZenApiKey` is an on-premises auth
-scheme and is not used by this SaaS adapter. Path B calls:
-```
-POST <ORCHESTRATE_URL>/v2/orchestrate/<agent_id>/chat/completions
-Authorization: Bearer <iam_access_token>
-
-{
-  "messages": [
-    {"role": "system", "content": "<agent constraints>"},
-    {"role": "user", "content": "<allowlisted input JSON>"}
-  ],
-  "stream": false
-}
-```
-
-The response is parsed as an OpenAI-style `choices[0].message.content`
-payload. Both string content and documented text-part arrays are accepted;
-undocumented `output` or `content` top-level shapes are rejected.
-
-All three backend agent services use `OrchestrateClient`; authentication, endpoint
-construction, response parsing, and non-sensitive telemetry are no longer
-duplicated across service adapters.
-
-The imported `sentinel_coordinator` definition is a separate, read-only review
-agent. It is not invoked by these backend adapters and does not replace the
-transactional workflow coordination performed by `AssessmentService`. Live
-coordinator import and collaborator execution remain acceptance evidence to be
-collected from an Orchestrate tenant.
-
-### All paths share the same output contract
-
-- System prompt is identical across Path B and Path A.
-- `_parse_and_validate()` applies the same allowlist filtering to all paths.
-- `AgentRun` rows are persisted for all three paths.
-- The `orchestrate_run_id` column stores
-  `path:<orchestrate|watsonx_ai|deterministic>` for auditability.
-
----
+The evidence event was `06b46f4d-76df-4979-b22b-d24aa60a30fb`; it reached
+`awaiting_review` with deterministic risk/confidence and the three specialist
+sources recorded as `orchestrate`. These identifiers are operational evidence,
+not configuration values to commit into runtime environment files.
 
 ## Consequences
 
-### Positive
-- No blocking dependency on Orchestrate provisioning.
-- Path B activates automatically after the tenant, credentials, and imported
-  agent IDs are configured.
-- Architecture intent is fully preserved and documented.
-- Operators and auditors can distinguish which path produced each triage result.
-- All safety constraints (ADR-003 through ADR-007) hold across all paths.
+Positive consequences are a single governed agent runtime, tenant-visible
+traces, explicit tool/collaborator controls, and no silent provider switch.
+The trade-off is that an Orchestrate outage yields deterministic reviewable
+results rather than remote model output. That trade-off is required by the
+master prompt's safety and human-oversight rules.
 
-### Negative / Trade-offs
-- Until Path B is active, the benefits of Orchestrate (versioning, governance,
-  collaborator chains, UI traces, evaluation, human-approval workflows) are absent.
-- Path A does not enforce agent-level tool permissions — this is enforced by the
-  SentinelIQ backend service layer instead.
+## Remaining completion conditions
 
-### What Orchestrate adds when provisioned (Path B benefits)
-- Agent versioning and change governance
-- Tool permission enforcement at the agent runtime level
-- Collaborator-agent chaining (Coordinator → Triage → Context → Explanation)
-- Traces visible in the Orchestrate UI
-- Human-approval steps within agent workflows
-- Agent evaluation via Orchestrate eval framework
-- Model routing across multiple foundation models
-
----
-
-## Migration path to Path B
-
-1. Provision watsonx Orchestrate instance (IBM Cloud catalog).
-2. Configure ADK CLI: `orchestrate env activate`.
-3. Import agents: `orchestrate agents import --file agents/triage/agent.yaml`.
-4. Set `ORCHESTRATE_URL` in `.env`.
-5. Invoke the imported agent through
-   `POST /v2/orchestrate/<agent_id>/chat/completions` using an IAM bearer token.
-   Record this as live-validated only after a tenant response passes the same
-   strict output validation as the fallback paths.
-6. Record the imported agent IDs in configuration and run the backend's strict
-   contract tests against the live tenant before declaring Path B validated.
+1. Merge the Path A-removal candidate, pass CI, and deploy that exact revision
+   to EC2.
+2. Verify a forced Orchestrate failure returns the deterministic fallback and
+   does not attempt direct watsonx.ai chat inference.
+3. Re-run the fresh-event and Coordinator proof against the deployed revision.
+4. Keep the OAuth client secret and tenant credentials only in ignored EC2
+   configuration.

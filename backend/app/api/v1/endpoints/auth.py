@@ -144,21 +144,27 @@ async def login(
 
     access_token = create_access_token(user.id, roles)
     refresh_token, refresh_claims = issue_refresh_token(user.id)
-    session.add(
-        RefreshTokenFamily(
-            family_id=refresh_claims.family_id,
-            user_id=user.id,
-        )
+    family = RefreshTokenFamily(
+        family_id=refresh_claims.family_id,
+        user_id=user.id,
     )
-    session.add(
-        RefreshToken(
-            token_id=refresh_claims.token_id,
-            family_id=refresh_claims.family_id,
-            user_id=user.id,
-            token_hash=_token_hash(refresh_token),
-            expires_at=refresh_claims.expires_at,
-        )
+    session.add(family)
+    # RefreshToken.family_id has a database foreign key but no ORM relationship
+    # to establish SQLAlchemy's unit-of-work ordering. Persist the parent before
+    # staging its child so PostgreSQL cannot insert the child first at commit.
+    await session.flush()
+    token_row = RefreshToken(
+        token_id=refresh_claims.token_id,
+        family_id=refresh_claims.family_id,
+        user_id=user.id,
+        token_hash=_token_hash(refresh_token),
+        expires_at=refresh_claims.expires_at,
     )
+    session.add(token_row)
+    # Validate the complete login-session write before returning bearer tokens.
+    # The request dependency commits later, so without this flush a constraint
+    # failure could occur after a nominal 200 response has started.
+    await session.flush()
 
     logger.info("auth.login", user_id=user.id, roles=roles)
 

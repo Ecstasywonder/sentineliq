@@ -1,6 +1,6 @@
 # Gates 14 and 16 — Candidate Completion Evidence
 
-**Status date:** 2026-11-07
+**Status date:** 2026-11-13
 **Execution environment:** EC2 only
 
 This is a candidate-completion record, not a claim that either gate has merged
@@ -14,11 +14,14 @@ and human review. It persists the assessment/recommendation relationship and
 supports idempotent assessment retrieval. The backend end-to-end path is
 covered by the EC2 test suite.
 
-The gate remains **partial**: an Orchestrate Coordinator definition has not
-been imported into a configured tenant and invoked live. The repository's
-agent YAML is therefore configuration evidence, not proof of a live coordinator
-workflow. This must be completed and recorded before Gate 14 can be marked
-complete.
+The gate remains **partial**, but its former live-runtime blocker is resolved:
+the Coordinator was imported and invoked in the configured tenant on
+2026-11-13. It executed read-only event/assessment tools and delegated to all
+three specialist collaborators. A fresh assessment recorded all specialist
+sources as `orchestrate` and stayed `awaiting_review`. The remaining strict
+completion conditions are merge/CI/deployment of the current candidate,
+including Coordinator persisted-data grounding and Path-A removal, then
+repeating that proof on the deployed revision.
 
 ## Gate 16 — Operator dashboard foundation
 
@@ -33,7 +36,7 @@ reviewed, validated in CI, and merged into `main`.
 | Area | Result |
 |------|--------|
 | Backend quality | `ruff check` passed; `ruff format --check` passed across 114 files |
-| Backend tests | 537 passed; 90.39% coverage on Python 3.11 with greenlet-aware tracing; the 85% gate passed |
+| Backend tests | Historical candidate evidence: 537 passed, 90.39% coverage; later focused EC2 regressions include 44 passing Coordinator/trust tests and 84 passing auth/tool-contract tests |
 | Database migration | Fresh upgrade → downgrade → upgrade and simulated released legacy-stamp upgrade reached Alembic head `0004`; 29 public tables and the JSON decision-snapshot column are present |
 | Frontend quality | fresh install, format check, TypeScript check, ESLint, 14 unit tests, and production build passed |
 | Frontend dependencies | production audit found 0 vulnerabilities; full audit has 0 high/critical findings and 6 moderate dev-only transitive findings |
@@ -48,6 +51,9 @@ to complete.
 
 1. Open a reviewed pull request from the pushed candidate branch.
 2. Record CI results against the merge commit and merge to `origin/main`.
-3. Configure the target Orchestrate runtime, import the Coordinator, invoke it
-   against the backend tool contract, and retain the import/run evidence.
-4. Update the Master Gate Plan only after the evidence above is available.
+3. Deploy the merged revision, verify the refresh-family foreign-key fix with
+   real HTTPS login and refresh rotation, then repeat the Orchestrate run/tool/
+   collaborator evidence on that revision.
+4. Demonstrate deterministic fallback after an Orchestrate failure without a
+   direct watsonx.ai chat attempt.
+5. Update the Master Gate Plan only after the evidence above is available.

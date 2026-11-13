@@ -1,16 +1,13 @@
 """
-ExplanationService — Master Build Prompt Gate 13 (dual-path, ADR-008).
+ExplanationService — Master Build Prompt Gate 13 (Orchestrate-first, ADR-008).
 
-Invocation priority (three paths, identical to TriageService / ContextService):
+Invocation priority (two paths, identical to TriageService / ContextService):
 
   PATH B — watsonx Orchestrate SaaS
     Condition: settings.orchestrate_active == True
 
-  PATH A — watsonx.ai Chat API (verified fallback)
-    Condition: settings.watsonx_active == True
-
   PATH 0 — Deterministic fallback (always available)
-    Condition: both above unavailable OR both fail
+    Condition: Orchestrate is unavailable or fails
 
 The Explanation Agent receives:
   - event metadata (type, timestamp, location, zone)
@@ -32,7 +29,7 @@ Design constraints (master prompt §19, §33, ADR-003, ADR-006):
   - Agent must NOT produce risk scores — risk_score / risk_level echoed from input only.
   - Agent must NOT produce enforcement decisions.
   - Neutral language enforced via system prompt and output validation.
-  - AgentRun row persisted for every call (all three paths).
+  - AgentRun row persisted for every call.
   - Event is NEVER lost on Explanation Agent failure.
 """
 
@@ -45,24 +42,15 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
 import structlog
 from pydantic import ValidationError
 
 from app.config import get_settings
 from app.models.agent_run import AgentRun, ToolCall
 from app.schemas.explanation import ExplanationAgentOutput, ExplanationResult, WhyReason
-from app.services.orchestrate_client import OrchestrateClient, validate_watsonx_base_url
+from app.services.orchestrate_client import OrchestrateClient
 
 logger = structlog.get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Endpoint constants (shared with TriageService / ContextService)
-# ---------------------------------------------------------------------------
-
-_WATSONX_CHAT_PATH = "/ml/v1/text/chat"
-_WATSONX_CHAT_VERSION = "2024-09-16"
-_IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
 
 # ---------------------------------------------------------------------------
 # Forbidden words — must not appear in operator-visible text (§19)
@@ -149,8 +137,7 @@ class ExplanationService:
 
     Path routing mirrors TriageService / ContextService (ADR-008):
       orchestrate_active → Path B
-      watsonx_active     → Path A  (current verified path)
-      neither            → Path 0  (deterministic)
+      otherwise          → Path 0  (deterministic)
     """
 
     def __init__(self, session: Any) -> None:
@@ -276,7 +263,7 @@ class ExplanationService:
                     "explanation.path_b.failed",
                     event_id=event_id,
                     error=str(exc),
-                    fallthrough="path_a",
+                    fallthrough="path_0",
                 )
                 await self._persist_agent_run(
                     run_id=attempt_id,
@@ -290,65 +277,6 @@ class ExplanationService:
                     error_message=str(exc)[:512],
                 )
 
-        # ---- PATH A: watsonx.ai Chat API (verified) --------------------------
-        if settings.watsonx_active and not force_deterministic:
-            attempt_id = str(uuid.uuid4())
-            attempt_started_at = datetime.now(UTC).isoformat()
-            attempt_t0 = time.monotonic()
-            try:
-                raw, tool_calls = await self._invoke_watsonx_ai(input_payload, effective_timeout)
-                duration_ms = (time.monotonic() - attempt_t0) * 1000
-                result = self._parse_and_validate(
-                    event_id,
-                    raw,
-                    risk_score,
-                    risk_level,
-                    confidence_score,
-                    evidence_errors,
-                    source="watsonx_ai",
-                    valid_evidence_ids=valid_evidence_ids,
-                    known_missing_sources=known_missing_sources,
-                    grounded_base=grounded_base,
-                )
-                result.agent_run_id = attempt_id
-                await self._persist_agent_run(
-                    run_id=attempt_id,
-                    event_id=event_id,
-                    started_at=attempt_started_at,
-                    status="success",
-                    duration_ms=duration_ms,
-                    agent_version=settings.watsonx_model_id,
-                    path="watsonx_ai",
-                    tool_calls=tool_calls,
-                )
-                logger.info(
-                    "explanation.path_a.success",
-                    event_id=event_id,
-                    risk_level=result.risk_level,
-                    has_missing=result.has_missing_evidence,
-                    duration_ms=round(duration_ms, 1),
-                )
-                return result
-            except Exception as exc:
-                duration_ms = (time.monotonic() - attempt_t0) * 1000
-                logger.warning(
-                    "explanation.path_a.failed",
-                    event_id=event_id,
-                    error=str(exc),
-                    fallthrough="path_0",
-                )
-                await self._persist_agent_run(
-                    run_id=attempt_id,
-                    event_id=event_id,
-                    started_at=attempt_started_at,
-                    status="failed",
-                    duration_ms=duration_ms,
-                    agent_version=settings.watsonx_model_id,
-                    path="watsonx_ai",
-                    tool_calls=[],
-                    error_message=str(exc)[:512],
-                )
-
         # ---- PATH 0: Deterministic fallback ----------------------------------
         attempt_id = str(uuid.uuid4())
         attempt_started_at = datetime.now(UTC).isoformat()
@@ -356,7 +284,6 @@ class ExplanationService:
         neither = (
             not force_deterministic
             and not settings.orchestrate_active
-            and not settings.watsonx_active
         )
         path0_status = "skipped" if neither else "failed_fallback"
 
@@ -401,73 +328,6 @@ class ExplanationService:
             system_prompt=_EXPLANATION_SYSTEM_PROMPT,
             input_payload=self._compact_payload_for_llm(input_payload),
         )
-
-    # ------------------------------------------------------------------
-    # PATH A — watsonx.ai Chat API
-    # ------------------------------------------------------------------
-
-    async def _invoke_watsonx_ai(
-        self,
-        input_payload: dict[str, Any],
-        timeout: float,
-    ) -> tuple[str, list[dict[str, Any]]]:
-        settings = self._settings
-        base_url = validate_watsonx_base_url(settings.effective_watsonx_base_url)
-
-        iam_token = await self._get_iam_token(settings.effective_watsonx_api_key, timeout)
-        headers = {
-            "Authorization": f"Bearer {iam_token}",
-            "Content-Type": "application/json",
-        }
-        compact = self._compact_payload_for_llm(input_payload)
-        payload: dict[str, Any] = {
-            "model_id": settings.watsonx_model_id,
-            "space_id": settings.effective_watsonx_space_id,
-            "messages": [
-                {"role": "system", "content": _EXPLANATION_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(compact, default=str)},
-            ],
-            "parameters": {"max_new_tokens": 800, "decoding_method": "greedy"},
-        }
-
-        url = f"{base_url}{_WATSONX_CHAT_PATH}?version={_WATSONX_CHAT_VERSION}"
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            t0 = time.monotonic()
-            response = await client.post(url, headers=headers, json=payload)
-            call_ms = (time.monotonic() - t0) * 1000
-            response.raise_for_status()
-
-        data = response.json()
-        tool_calls = [
-            {
-                "tool_name": "watsonx_chat",
-                "status": "success",
-                "duration_ms": call_ms,
-                "sequence": 0,
-            }
-        ]
-
-        choices = data.get("choices") or []
-        if not choices:
-            raise ValueError("watsonx.ai explanation response contained no choices.")
-        content = (choices[0].get("message") or {}).get("content", "")
-        if not content:
-            raise ValueError("watsonx.ai explanation response content was empty.")
-
-        return content, tool_calls
-
-    async def _get_iam_token(self, api_key: str, timeout: float) -> str:
-        async with httpx.AsyncClient(timeout=min(timeout, 15.0)) as client:
-            resp = await client.post(
-                _IAM_TOKEN_URL,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={"grant_type": "urn:ibm:params:oauth:grant-type:apikey", "apikey": api_key},
-            )
-            resp.raise_for_status()
-        access_token = resp.json().get("access_token", "")
-        if not access_token:
-            raise ValueError("IAM token exchange returned no access_token.")
-        return access_token
 
     # ------------------------------------------------------------------
     # Payload helpers

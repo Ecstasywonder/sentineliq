@@ -50,7 +50,6 @@ class ExplanationResult(BaseModel):
 
     ``source`` values:
       - "orchestrate"            — Path B (Orchestrate SaaS)
-      - "watsonx_ai"             — Path A (watsonx.ai Chat API, verified)
       - "deterministic_fallback" — Path 0 (rule-based, no LLM)
     """
 

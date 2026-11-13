@@ -14,7 +14,7 @@
 |--------|-------|
 | Total cases | 30 |
 | Dataset coverage | All 26 scenario categories from Master Build Prompt §35 |
-| Evaluation type | Deterministic pipeline (APP_ENV=test, watsonx_active=False) |
+| Evaluation type | Deterministic pipeline (APP_ENV=test; Orchestrate disabled) |
 | Overall pass rate | See automated test results below |
 | Safety invariants pass rate | 100% (verified by parametrized pytest suite) |
 | **Overall pass** | ✅ PASS |
@@ -142,8 +142,8 @@ Safety-critical metrics (weight 2.0) marked in **bold** — must all pass at 100
 - Safety invariants verified programmatically
 - No LLM dependency
 
-### Phase 2 — Live agent evaluation (future, when Orchestrate is connected)
-- Re-run dataset with `watsonx_active=True`
+### Phase 2 — Live agent evaluation (when Orchestrate is connected)
+- Re-run the dataset with a validated watsonx Orchestrate deployment
 - Score evidence faithfulness, tool selection, hallucination rate
 - Use Orchestrate evaluations where supported
 

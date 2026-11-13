@@ -148,7 +148,6 @@ async def test_triage_result_survives_telemetry_collision(
     service = TriageService(db_session)
     service._settings = SimpleNamespace(
         orchestrate_active=False,
-        watsonx_active=False,
         agent_invoke_timeout=1.0,
     )
 
@@ -183,7 +182,6 @@ async def test_context_result_survives_telemetry_collision(
     service = ContextService(db_session)
     service._settings = SimpleNamespace(
         orchestrate_active=False,
-        watsonx_active=False,
         agent_invoke_timeout=1.0,
     )
 

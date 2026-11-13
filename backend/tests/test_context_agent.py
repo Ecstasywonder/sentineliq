@@ -9,9 +9,7 @@ Tests cover:
    - context_summary construction
 2. LLM path (mocked HTTP)
    - Path B (Orchestrate) success
-   - Path A (watsonx.ai) success
-   - Path B failure → falls through to Path A
-   - Path A failure → falls through to Path 0
+   - Path B failure → falls through to Path 0
 3. Agent output validation / injection filtering
    - unknown source keys cannot influence authoritative output
    - malformed or contradictory output is rejected
@@ -326,9 +324,9 @@ class TestParseAndValidate:
         svc = self._svc()
         ev = _make_evidence(access_events=_section_present(2))
         result = svc._parse_and_validate(
-            "EVT-001", self._minimal_valid_json(), ["access_control"], ev, source="watsonx_ai"
+            "EVT-001", self._minimal_valid_json(), ["access_control"], ev, source="orchestrate"
         )
-        assert result.source == "watsonx_ai"
+        assert result.source == "orchestrate"
         # Structural fields are authoritative from evidence
         assert "access_control" in result.source_statuses
         assert result.source_statuses["access_control"].status == "verified_present"
@@ -397,19 +395,19 @@ class TestParseAndValidate:
         raw = json.dumps({"event_id": "EVT-001", "context_summary": long_summary})
         with pytest.raises(ValueError, match="violated its contract"):
             # Pydantic rejects > 1024 before we even truncate — that's correct.
-            svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
+            svc._parse_and_validate("EVT-001", raw, [], ev, source="orchestrate")
 
     def test_non_json_raises_value_error(self):
         svc = self._svc()
         ev = _make_evidence()
         with pytest.raises(ValueError, match="non-JSON"):
-            svc._parse_and_validate("EVT-001", "this is not json", [], ev, source="watsonx_ai")
+            svc._parse_and_validate("EVT-001", "this is not json", [], ev, source="orchestrate")
 
     def test_markdown_fenced_json_stripped(self):
         svc = self._svc()
         ev = _make_evidence(access_events=_section_present(2))
         fenced = "```json\n" + self._minimal_valid_json() + "\n```"
-        result = svc._parse_and_validate("EVT-001", fenced, [], ev, source="watsonx_ai")
+        result = svc._parse_and_validate("EVT-001", fenced, [], ev, source="orchestrate")
         assert "Access records found" in result.context_summary
 
     def test_event_id_mismatch_is_rejected(self):
@@ -421,7 +419,7 @@ class TestParseAndValidate:
                 self._minimal_valid_json(event_id="EVT-OTHER"),
                 ["access_control"],
                 ev,
-                source="watsonx_ai",
+                source="orchestrate",
             )
 
     def test_missing_context_summary_key_is_rejected(self):
@@ -430,7 +428,7 @@ class TestParseAndValidate:
         ev = _make_evidence()
         raw = json.dumps({"event_id": "EVT-001"})  # no context_summary
         with pytest.raises(ValueError, match="violated its contract"):
-            svc._parse_and_validate("EVT-001", raw, [], ev, source="watsonx_ai")
+            svc._parse_and_validate("EVT-001", raw, [], ev, source="orchestrate")
 
     def test_authoritative_statuses_reflect_evidence_not_llm(self):
         """source_statuses come from evidence regardless of LLM output."""
@@ -542,75 +540,6 @@ class TestLLMPaths:
         )
 
     @pytest.mark.asyncio
-    async def test_path_a_success(self):
-        svc = self._svc()
-        ev = _make_evidence(access_events=_section_present(1))
-
-        mock_iam = AsyncMock(return_value="fake-iam-token")
-        mock_invoke = AsyncMock(return_value=(self._valid_llm_response(), []))
-
-        with (
-            patch.object(svc, "_get_iam_token", mock_iam),
-            patch.object(svc, "_invoke_watsonx_ai", mock_invoke),
-            patch("app.services.context_service.get_settings") as mock_settings,
-        ):
-            settings = MagicMock()
-            settings.orchestrate_active = False
-            settings.watsonx_active = True
-            settings.agent_invoke_timeout = 30.0
-            settings.watsonx_model_id = "ibm/granite-4-h-small"
-            settings.effective_watsonx_base_url = "https://us-south.ml.cloud.ibm.com"
-            settings.effective_watsonx_space_id = "test-space"
-            settings.effective_watsonx_api_key = "test-key"
-            mock_settings.return_value = settings
-            svc._settings = settings
-
-            with patch.object(svc, "_persist_agent_run", AsyncMock()):
-                result = await svc.run(
-                    event_id="EVT-001",
-                    event_metadata={"event_type": "person_detected"},
-                    required_context=["access_control"],
-                    evidence=ev,
-                )
-
-        assert result.source == "watsonx_ai"
-        assert "access_control" in result.source_statuses
-
-    @pytest.mark.asyncio
-    async def test_path_a_failure_falls_back_to_path_0(self):
-        svc = self._svc()
-        ev = _make_evidence(access_events=_section_present(1))
-
-        with (
-            patch("app.services.context_service.get_settings") as mock_settings,
-        ):
-            settings = MagicMock()
-            settings.orchestrate_active = False
-            settings.watsonx_active = True
-            settings.agent_invoke_timeout = 30.0
-            settings.watsonx_model_id = "ibm/granite-4-h-small"
-            settings.effective_watsonx_base_url = "https://us-south.ml.cloud.ibm.com"
-            settings.effective_watsonx_space_id = "test-space"
-            settings.effective_watsonx_api_key = "test-key"
-            mock_settings.return_value = settings
-            svc._settings = settings
-
-            with (
-                patch.object(
-                    svc, "_invoke_watsonx_ai", AsyncMock(side_effect=RuntimeError("network"))
-                ),
-                patch.object(svc, "_persist_agent_run", AsyncMock()),
-            ):
-                result = await svc.run(
-                    event_id="EVT-001",
-                    event_metadata={"event_type": "person_detected"},
-                    required_context=["access_control"],
-                    evidence=ev,
-                )
-
-        assert result.source == "deterministic_fallback"
-
-    @pytest.mark.asyncio
     async def test_path_0_used_when_no_credentials(self):
         svc = self._svc()
         ev = _make_evidence(schedule=_section_present(1))
@@ -618,7 +547,6 @@ class TestLLMPaths:
         with patch("app.services.context_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.orchestrate_active = False
-            settings.watsonx_active = False
             settings.agent_invoke_timeout = 30.0
             mock_settings.return_value = settings
             svc._settings = settings
@@ -635,35 +563,31 @@ class TestLLMPaths:
         assert result.event_id == "EVT-001"
 
     @pytest.mark.asyncio
-    async def test_path_b_failure_falls_through_to_path_a(self):
+    async def test_path_b_failure_falls_through_to_path_0(self):
         svc = self._svc()
         ev = _make_evidence(access_events=_section_present(1))
 
         with patch("app.services.context_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.orchestrate_active = True
-            settings.watsonx_active = True
             settings.orchestrate_context_agent_id = "ctx-agent-001"
             settings.orchestrate_url = "https://fake.orchestrate"
             settings.agent_invoke_timeout = 30.0
-            settings.watsonx_model_id = "ibm/granite-4-h-small"
             settings.effective_watsonx_base_url = "https://us-south.ml.cloud.ibm.com"
-            settings.effective_watsonx_space_id = "test-space"
-            settings.effective_watsonx_api_key = "test-key"
+            settings.effective_watsonx_api_key = "legacy-key"
+            settings.effective_watsonx_space_id = "legacy-space"
             mock_settings.return_value = settings
             svc._settings = settings
+            assert not hasattr(svc, "_invoke_watsonx_ai")
 
-            valid_response = self._valid_llm_response()
             with (
                 patch.object(
                     svc,
                     "_invoke_orchestrate_saas",
                     AsyncMock(side_effect=RuntimeError("orchestrate down")),
                 ),
-                patch.object(
-                    svc, "_invoke_watsonx_ai", AsyncMock(return_value=(valid_response, []))
-                ),
-                patch.object(svc, "_persist_agent_run", AsyncMock()),
+                patch.object(svc, "_persist_agent_run", AsyncMock()) as persist_run,
+                patch("httpx.AsyncClient.post", new_callable=AsyncMock) as direct_chat_post,
             ):
                 result = await svc.run(
                     event_id="EVT-001",
@@ -672,7 +596,14 @@ class TestLLMPaths:
                     evidence=ev,
                 )
 
-        assert result.source == "watsonx_ai"
+        assert result.source == "deterministic_fallback"
+        direct_chat_post.assert_not_awaited()
+        persist_run.assert_awaited_once()
+        persisted = persist_run.await_args.kwargs
+        assert persisted["status"] == "failed_fallback"
+        assert persisted["path"] == "deterministic"
+        assert persisted["tool_calls"][0]["tool_name"] == "orchestrate_chat_completion"
+        assert persisted["tool_calls"][0]["status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

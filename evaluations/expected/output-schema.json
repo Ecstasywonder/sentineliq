@@ -18,7 +18,7 @@
     },
     "triage_source": {
       "type": "string",
-      "allowed_values": ["deterministic_fallback", "orchestrate_agent", "watsonx_ai"]
+      "allowed_values": ["deterministic_fallback", "orchestrate"]
     },
     "risk_level": {
       "type": "string",

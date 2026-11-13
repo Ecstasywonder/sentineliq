@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -187,8 +188,8 @@ class TestUnavailableLLM:
     async def test_triage_falls_back_to_deterministic_when_llm_unavailable(
         self, db_session: AsyncSession
     ) -> None:
-        """When both Path B and Path A are inactive (test env), triage always
-        returns a deterministic result — never None, never raises."""
+        """When Path B is inactive (test env), triage always returns a
+        deterministic result — never None, never raises."""
         svc = TriageService(db_session)
         meta = _event_meta(event_type="person_detected")
         result = await svc.run("evt-llm-off", meta)
@@ -208,27 +209,10 @@ class TestUnavailableLLM:
     async def test_triage_source_is_deterministic_fallback_in_test_env(
         self, db_session: AsyncSession
     ) -> None:
-        """In the test environment, settings.orchestrate_active and watsonx_active
-        are both False (APP_ENV=test), so Path 0 is always used."""
+        """In the test environment, Orchestrate is inactive (APP_ENV=test),
+        so Path 0 is always used."""
         svc = TriageService(db_session)
         result = await svc.run("evt-llm-src", _event_meta())
-        assert result.source == "deterministic_fallback"
-
-    async def test_triage_falls_to_deterministic_when_watsonx_raises(
-        self, db_session: AsyncSession
-    ) -> None:
-        """Even if Path A is patched to raise, Path 0 must catch and return a result."""
-        svc = TriageService(db_session)
-        with patch.object(
-            svc,
-            "_invoke_watsonx_ai",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("watsonx.ai unavailable"),
-        ):
-            result = await svc.run("evt-watsonx-err", _event_meta())
-
-        assert isinstance(result, TriageResult)
-        # Must have fallen through to deterministic
         assert result.source == "deterministic_fallback"
 
     async def test_triage_result_never_contains_risk_score(self, db_session: AsyncSession) -> None:
@@ -443,14 +427,21 @@ class TestTimeout:
         assert result.access_events is None
         assert "access_events" in result.errors
 
-    async def test_triage_timeout_falls_to_deterministic(self, db_session: AsyncSession) -> None:
-        """A TimeoutException during TriageService Path A causes fallthrough to Path 0."""
+    async def test_orchestrate_timeout_falls_to_deterministic(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A Path B timeout must terminate in the deterministic safety path."""
         svc = TriageService(db_session)
+        svc._settings = SimpleNamespace(
+            orchestrate_active=True,
+            orchestrate_triage_agent_id="11111111-2222-4333-8444-555555555555",
+            agent_invoke_timeout=30.0,
+        )
         with patch.object(
             svc,
-            "_invoke_watsonx_ai",
+            "_invoke_orchestrate_saas",
             new_callable=AsyncMock,
-            side_effect=httpx.TimeoutException("LLM call timed out after 30s"),
+            side_effect=httpx.TimeoutException("Orchestrate call timed out"),
         ):
             result = await svc.run("evt-triage-timeout", _event_meta())
 

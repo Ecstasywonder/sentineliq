@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # Full tenant URL of the watsonx Orchestrate SaaS instance.
     # Format: https://<tenant>.ibm-watson-orchestrate.com
     # When set + orchestrate_api_key is set → Path B is active.
-    # Leave empty to fall through to Path A (watsonx.ai direct).
+    # Leave empty to use the deterministic agent fallback.
     orchestrate_url: str = ""
     orchestrate_api_key: str = ""
     # The current SaaS direct-agent runtime contract, verified against a live
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     orchestrate_tools_client_secret: SecretStr = SecretStr("")
 
     # -------------------------------------------------------------------------
-    # IBM watsonx.ai (Path A — verified fallback)
+    # IBM watsonx.ai embeddings (Gate 8 hybrid retrieval only)
     # -------------------------------------------------------------------------
     # Base URL for the watsonx.ai ML API.
     # Verified: https://us-south.ml.cloud.ibm.com
@@ -93,12 +93,8 @@ class Settings(BaseSettings):
     # Used to obtain short-lived IAM bearer tokens.
     watsonx_api_key: str = ""
     # Space ID — must have a Watson Machine Learning instance associated.
-    # Verified working: Orchestrate (Developer edition) space.
     watsonx_space_id: str = ""
-    # Model used for agent calls via watsonx.ai Chat API.
-    # Verified: ibm/granite-4-h-small supports text_chat.
-    watsonx_model_id: str = "ibm/granite-4-h-small"
-    # Embedding model used by Gate 8 hybrid retrieval when watsonx.ai is active.
+    # Embedding model used by Gate 8 hybrid retrieval.
     watsonx_embedding_model_id: str = "ibm/slate-30m-english-rtrvr"
     watsonx_api_version: str = "2024-05-31"
 
@@ -154,8 +150,8 @@ class Settings(BaseSettings):
         )
 
     @property
-    def watsonx_active(self) -> bool:
-        """True when the watsonx.ai Chat API is usable (Path A)."""
+    def watsonx_embeddings_active(self) -> bool:
+        """True when the watsonx.ai embeddings API is usable for retrieval."""
         if self.app_env == "test" or "PYTEST_CURRENT_TEST" in os.environ:
             return False
         return bool(

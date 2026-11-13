@@ -346,7 +346,7 @@ class TestParseAndValidate:
 
 
 class TestCoordinatorServiceRun:
-    def test_runtime_prompt_requires_each_specialist_collaborator(self) -> None:
+    async def test_runtime_prompt_requires_each_specialist_collaborator(self) -> None:
         assert "delegate exactly one bounded read-only" in _COORDINATOR_SYSTEM_PROMPT
         for collaborator_role in ("Triage", "Context", "Explanation"):
             assert collaborator_role in _COORDINATOR_SYSTEM_PROMPT

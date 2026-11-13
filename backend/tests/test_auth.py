@@ -275,6 +275,7 @@ async def test_login_persists_refresh_token_family_before_its_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Login flushes the FK parent before staging the refresh-token child."""
+    await app.state.rate_limiter.reset()
     email = f"auth_refresh_order_{_id()[:8]}@test.com"
     await _seed_user(db_session, email, "pass")
     await db_session.commit()
@@ -299,6 +300,7 @@ async def test_login_persists_refresh_token_family_before_its_token(
             "/api/v1/auth/token",
             json={"email": email, "password": "pass"},
         )
+    await app.state.rate_limiter.reset()
 
     assert response.status_code == 200, response.text
     assert flush_calls == [(True, False), (False, True)]
